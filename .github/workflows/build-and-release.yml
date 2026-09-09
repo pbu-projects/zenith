@@ -55,9 +55,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Compile Native Binary
-        env:
-          GRADLE_OPTS: ${{ runner.os == 'Windows' && format('-Djava.io.tmpdir={0}', runner.temp) || '' }}
         run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export GRADLE_OPTS="-Djava.io.tmpdir=${RUNNER_TEMP//\\//}"
+          fi
           ./gradlew test nativeCompile --no-daemon
 
       - name: Stage Artifact
