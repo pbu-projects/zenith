@@ -1,0 +1,18 @@
+micronaut:
+  application:
+    name: zenith
+  mcp:
+    server:
+      info:
+        name: zenith-zendesk-mcp
+        version: 0.1.0
+      transport: STDIO
+  http:
+    services:
+      zendesk:
+        url: ${ZENDESK_URL:`https://example.zendesk.com`}
+        oauth:
+          client-id: ${ZENDESK_CLIENT_ID:}
+          client-secret: ${ZENDESK_CLIENT_SECRET:}
+          token: ${ZENDESK_OAUTH_TOKEN:}
+          scope: ${ZENDESK_OAUTH_SCOPE:`read write`}
