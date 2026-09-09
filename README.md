@@ -45,11 +45,17 @@ export ZENDESK_OAUTH_SCOPE="read write"
 
 ## Building and Running
 
-### Build the Distribution
+### Build the JVM Distribution
 ```bash
 ./gradlew installDist
 ```
 The executable binary will be generated at `build/install/zenith/bin/zenith`.
+
+### Build the GraalVM Standalone Native Executable (~40ms startup)
+```bash
+./gradlew nativeCompile
+```
+The standalone native executable will be generated at `build/native/nativeCompile/zenith`.
 
 ### Running Tests
 ```bash
