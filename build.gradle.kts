@@ -92,6 +92,19 @@ tasks.withType<AbstractTestTask>().configureEach {
     failOnNoDiscoveredTests = false
 }
 
+tasks.withType<Test>().configureEach {
+    val envFile = file(".env")
+    if (envFile.exists()) {
+        envFile.readLines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                val (key, value) = trimmed.split("=", limit = 2)
+                environment(key.trim(), value.trim())
+            }
+        }
+    }
+}
+
 tasks.named("test") {
     dependsOn("installDist")
 }
