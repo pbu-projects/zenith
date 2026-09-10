@@ -114,7 +114,15 @@ class ZendeskMcpClientSpec extends Specification {
                 "searchCount",
                 "createTicket",
                 "updateTicket",
-                "listTicketFields"
+                "listTicketFields",
+                "getTicketField",
+                "listTicketForms",
+                "getTicketForm",
+                "listCustomObjects",
+                "getCustomObject",
+                "listCustomObjectRecords",
+                "getCustomObjectRecord",
+                "searchCustomObjectRecords"
         ])
     }
 
@@ -161,6 +169,28 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "tickets are returned over the MCP protocol"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+    }
+
+    def "7. MCP Client invokes listTicketForms tool over STDIO protocol"() {
+        when: "client invokes listTicketForms tool"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("listTicketForms", [:]))
+
+        then: "ticket forms are returned over the MCP protocol"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+    }
+
+    def "8. MCP Client invokes listCustomObjects tool over STDIO protocol"() {
+        when: "client invokes listCustomObjects tool"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("listCustomObjects", [:]))
+
+        then: "custom objects are returned over the MCP protocol"
         result != null
         !Boolean.TRUE.equals(result.isError())
         result.content() != null

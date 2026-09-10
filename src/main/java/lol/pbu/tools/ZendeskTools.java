@@ -5,8 +5,11 @@ import io.micronaut.core.util.StringUtils;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
 import jakarta.inject.Singleton;
+import lol.pbu.z4j.client.CustomObjectRecordsClient;
+import lol.pbu.z4j.client.CustomObjectsClient;
 import lol.pbu.z4j.client.SearchClient;
 import lol.pbu.z4j.client.TicketClient;
+import lol.pbu.z4j.client.TicketFormsClient;
 import lol.pbu.z4j.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +22,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * MCP Tools exposing Zendesk ticket management and search operations via z4j.
+ * MCP Tools exposing Zendesk ticket management, forms, custom objects, and search operations via z4j.
  */
 @Singleton
 public class ZendeskTools {
@@ -28,10 +31,22 @@ public class ZendeskTools {
 
     private final TicketClient ticketClient;
     private final SearchClient searchClient;
+    private final TicketFormsClient ticketFormsClient;
+    private final CustomObjectsClient customObjectsClient;
+    private final CustomObjectRecordsClient customObjectRecordsClient;
 
-    public ZendeskTools(TicketClient ticketClient, SearchClient searchClient) {
+    public ZendeskTools(
+            TicketClient ticketClient,
+            SearchClient searchClient,
+            TicketFormsClient ticketFormsClient,
+            CustomObjectsClient customObjectsClient,
+            CustomObjectRecordsClient customObjectRecordsClient
+    ) {
         this.ticketClient = ticketClient;
         this.searchClient = searchClient;
+        this.ticketFormsClient = ticketFormsClient;
+        this.customObjectsClient = customObjectsClient;
+        this.customObjectRecordsClient = customObjectRecordsClient;
     }
 
     @Tool(description = "Get details of a specific Zendesk ticket by its numeric ID")
@@ -179,5 +194,67 @@ public class ZendeskTools {
     public TicketFieldsResponse listTicketFields() {
         log.info("MCP Tool called: listTicketFields()");
         return ticketClient.listTicketFields(null, true).block();
+    }
+
+    @Tool(description = "Get details of a specific Zendesk ticket field by its numeric ID")
+    public TicketFieldResponse getTicketField(
+            @ToolArg(description = "The numeric ticket field ID") Long ticketFieldId
+    ) {
+        log.info("MCP Tool called: getTicketField(id={})", ticketFieldId);
+        return ticketClient.showTicketField(ticketFieldId).block();
+    }
+
+    @Tool(description = "List all ticket forms configured in Zendesk")
+    public TicketFormsResponse listTicketForms() {
+        log.info("MCP Tool called: listTicketForms()");
+        return ticketFormsClient.listTicketForms().block();
+    }
+
+    @Tool(description = "Get details of a specific Zendesk ticket form by its numeric ID")
+    public TicketFormResponse getTicketForm(
+            @ToolArg(description = "The numeric ticket form ID") Long ticketFormId
+    ) {
+        log.info("MCP Tool called: getTicketForm(id={})", ticketFormId);
+        return ticketFormsClient.showTicketForm(ticketFormId).block();
+    }
+
+    @Tool(description = "List all custom objects defined in Zendesk")
+    public CustomObjectsResponse listCustomObjects() {
+        log.info("MCP Tool called: listCustomObjects()");
+        return customObjectsClient.listCustomObjects().block();
+    }
+
+    @Tool(description = "Get details and schema of a specific custom object by its key")
+    public CustomObjectResponse getCustomObject(
+            @ToolArg(description = "The key of the custom object") String customObjectKey
+    ) {
+        log.info("MCP Tool called: getCustomObject(key='{}')", customObjectKey);
+        return customObjectsClient.showCustomObject(customObjectKey).block();
+    }
+
+    @Tool(description = "List records for a specific Zendesk custom object")
+    public CustomObjectRecordsResponse listCustomObjectRecords(
+            @ToolArg(description = "The key of the custom object") String customObjectKey
+    ) {
+        log.info("MCP Tool called: listCustomObjectRecords(key='{}')", customObjectKey);
+        return customObjectRecordsClient.listCustomObjectRecords(customObjectKey).block();
+    }
+
+    @Tool(description = "Get details of a specific custom object record by its ID")
+    public CustomObjectRecordResponse getCustomObjectRecord(
+            @ToolArg(description = "The key of the custom object") String customObjectKey,
+            @ToolArg(description = "The ID of the custom object record") String recordId
+    ) {
+        log.info("MCP Tool called: getCustomObjectRecord(key='{}', recordId='{}')", customObjectKey, recordId);
+        return customObjectRecordsClient.showCustomObjectRecord(customObjectKey, recordId).block();
+    }
+
+    @Tool(description = "Search records for a specific Zendesk custom object matching query text")
+    public CustomObjectRecordsResponse searchCustomObjectRecords(
+            @ToolArg(description = "The key of the custom object") String customObjectKey,
+            @ToolArg(description = "Search query string") String query
+    ) {
+        log.info("MCP Tool called: searchCustomObjectRecords(key='{}', query='{}')", customObjectKey, query);
+        return customObjectRecordsClient.searchCustomObjectRecords(customObjectKey, query).block();
     }
 }

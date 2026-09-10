@@ -52,6 +52,28 @@ class ZenithSpec extends Specification {
         then:
         json != null
         noExceptionThrown()
+
+        when:
+        def forms = zendeskTools.listTicketForms()
+
+        then:
+        forms != null
+        forms.ticketForms != null
+
+        when:
+        def customObjects = zendeskTools.listCustomObjects()
+
+        then:
+        customObjects != null
+        customObjects.customObjects != null
+
+        when:
+        def fields = zendeskTools.listTicketFields()
+        def firstFieldId = fields.ticketFields?.first()?.id
+        def field = firstFieldId != null ? zendeskTools.getTicketField(firstFieldId) : null
+
+        then:
+        firstFieldId == null || (field != null && field.ticketField != null)
     }
 
     @Inject

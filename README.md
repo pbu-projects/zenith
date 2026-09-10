@@ -47,7 +47,15 @@ Add to your MCP client config:
 * `searchCount`: Count search results.
 * `createTicket`: Create ticket.
 * `updateTicket`: Update ticket comment, status, or priority.
-* `listTicketFields`: List ticket fields.
+* `listTicketFields`: List all active ticket fields.
+* `getTicketField`: Fetch ticket field by ID (schema discovery).
+* `listTicketForms`: List all ticket forms.
+* `getTicketForm`: Fetch ticket form by ID.
+* `listCustomObjects`: List all custom objects.
+* `getCustomObject`: Fetch custom object schema and details by key.
+* `listCustomObjectRecords`: List records for a custom object.
+* `getCustomObjectRecord`: Fetch a specific custom object record by ID.
+* `searchCustomObjectRecords`: Search custom object records matching query text.
 
 ## Contributing
 
