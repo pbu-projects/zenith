@@ -11,6 +11,13 @@ import lol.pbu.z4j.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+
 /**
  * MCP Tools exposing Zendesk ticket management and search operations via z4j.
  */
@@ -31,6 +38,43 @@ public class ZendeskTools {
     public TicketResponse getTicket(@ToolArg(description = "The numeric ticket ID") Long ticketId) {
         log.info("MCP Tool called: getTicket(id={})", ticketId);
         return ticketClient.showTicket(ticketId).block();
+    }
+
+    @Tool(description = "Get details of multiple Zendesk tickets by their numeric IDs")
+    public TicketsResponse getTickets(
+            @ToolArg(description = "List of numeric ticket IDs to retrieve") List<Long> ticketIds
+    ) {
+        log.info("MCP Tool called: getTickets(ids={})", ticketIds);
+        if (ticketIds == null || ticketIds.isEmpty()) {
+            return new TicketsResponse(Collections.emptyList());
+        }
+
+        List<?> rawIds = ticketIds;
+        java.util.List<Long> distinctIds = new java.util.ArrayList<>();
+        for (Object obj : rawIds) {
+            if (obj instanceof Number num) {
+                distinctIds.add(num.longValue());
+            } else if (obj != null) {
+                try {
+                    distinctIds.add(Long.parseLong(obj.toString().trim()));
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid ticket ID format: {}", obj);
+                }
+            }
+        }
+        distinctIds = distinctIds.stream().distinct().toList();
+
+        List<Ticket> tickets = Flux.fromIterable(distinctIds)
+                .flatMapSequential(id -> ticketClient.showTicket(id)
+                        .map(TicketResponse::getTicket)
+                        .onErrorResume(e -> {
+                            log.warn("Failed to fetch ticket {}: {}", id, e.getMessage());
+                            return Mono.empty();
+                        }), 10)
+                .collectList()
+                .block();
+
+        return new TicketsResponse(tickets != null ? tickets : Collections.emptyList());
     }
 
     @Tool(description = "List recent Zendesk tickets")

@@ -107,6 +107,7 @@ class ZendeskMcpClientSpec extends Specification {
         def toolNames = toolsResult.tools*.name
         toolNames.containsAll([
                 "getTicket",
+                "getTickets",
                 "listTickets",
                 "getTicketCount",
                 "search",
@@ -147,6 +148,19 @@ class ZendeskMcpClientSpec extends Specification {
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("listTicketFields", [:]))
 
         then: "fields are returned"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+    }
+
+    def "6. MCP Client invokes getTickets tool over STDIO protocol"() {
+        when: "client invokes getTickets tool with a list of ticket IDs"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("getTickets", [
+                ticketIds: [7L]
+        ]))
+
+        then: "tickets are returned over the MCP protocol"
         result != null
         !Boolean.TRUE.equals(result.isError())
         result.content() != null

@@ -36,6 +36,24 @@ class ZenithSpec extends Specification {
         ticketResult != null
         ticketResult.ticket != null
         ticketResult.ticket.id == 7L
+
+        when:
+        def ticketsResult = zendeskTools.getTickets([7L])
+
+        then:
+        ticketsResult != null
+        ticketsResult.tickets != null
+        !ticketsResult.tickets.isEmpty()
+        ticketsResult.tickets.first().id == 7L
+
+        when:
+        def json = jsonMapper.writeValueAsString(ticketsResult)
+
+        then:
+        json != null
+        noExceptionThrown()
     }
 
+    @Inject
+    io.micronaut.json.JsonMapper jsonMapper
 }

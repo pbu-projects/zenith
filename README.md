@@ -40,6 +40,7 @@ Add to your MCP client config:
 ## Tools
 
 * `getTicket`: Fetch ticket by ID.
+* `getTickets`: Fetch multiple tickets by IDs.
 * `listTickets`: List recent tickets.
 * `getTicketCount`: Fetch ticket counts.
 * `search`: Search Zendesk (`type:ticket ...`).
