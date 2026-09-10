@@ -36,6 +36,8 @@ class ZenithSpec extends Specification {
         ticketResult != null
         ticketResult.ticket != null
         ticketResult.ticket.id == 7L
+        ticketResult.ticket.customFields != null
+        !ticketResult.ticket.customFields.any { it == null }
 
         when:
         def ticketsResult = zendeskTools.getTickets([7L])
