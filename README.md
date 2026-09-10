@@ -43,13 +43,15 @@ Add to your MCP client config:
 * `getTickets`: Fetch multiple tickets by IDs.
 * `listTickets`: List recent tickets.
 * `getTicketCount`: Fetch ticket counts.
-* `search`: Search Zendesk (`type:ticket ...`).
+* `search`: Search Zendesk (`type:ticket ...`). Supports sideloading related resources (`include=users,organizations,groups`).
 * `searchCount`: Count search results.
 * `createTicket`: Create ticket (supports subject, comment, status, priority, and attachments).
 * `updateTicket`: Update ticket comment, status, priority, or attachments.
 * `uploadAttachment`: Upload local file or image and receive an upload token to attach to tickets.
 * `batchUpdateTickets`: Batch update multiple tickets concurrently or asynchronously via Zendesk bulk job.
 * `getJobStatus`: Fetch status and progress of an asynchronous Zendesk background job by ID.
+* `getTicketAudits`: Fetch full audit event history for a ticket (field changes, comments, notifications, and trigger/business rule executions).
+* `getBestPractices`: Operational guidance, rate limit quotas, search sideloading syntax, and trigger debugging best practices.
 * `listTicketFields`: List all active ticket fields.
 * `getTicketField`: Fetch ticket field by ID (schema discovery).
 * `listTicketForms`: List all ticket forms.

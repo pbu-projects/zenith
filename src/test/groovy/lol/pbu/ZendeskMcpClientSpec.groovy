@@ -125,7 +125,9 @@ class ZendeskMcpClientSpec extends Specification {
                 "searchCustomObjectRecords",
                 "uploadAttachment",
                 "batchUpdateTickets",
-                "getJobStatus"
+                "getJobStatus",
+                "getTicketAudits",
+                "getBestPractices"
         ])
     }
 
@@ -141,9 +143,10 @@ class ZendeskMcpClientSpec extends Specification {
     }
 
     def "4. MCP Client invokes search tool over STDIO protocol"() {
-        when: "client searches tickets using Zendesk search syntax"
+        when: "client searches tickets using Zendesk search syntax with sideloading"
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("search", [
                 query: "type:ticket",
+                include: "users,organizations",
                 perPage: 2
         ]))
 
@@ -230,6 +233,32 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "batch update completes and returns result list"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+    }
+
+    def "11. MCP Client invokes getTicketAudits tool over STDIO protocol"() {
+        when: "client calls getTicketAudits tool for ticket event history"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("getTicketAudits", [
+                ticketId: 7L
+        ]))
+
+        then: "ticket audits are returned over MCP protocol"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+    }
+
+    def "12. MCP Client invokes getBestPractices tool over STDIO protocol"() {
+        when: "client calls getBestPractices tool"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("getBestPractices", [
+                topic: "all"
+        ]))
+
+        then: "operational documentation is returned over MCP protocol"
         result != null
         !Boolean.TRUE.equals(result.isError())
         result.content() != null

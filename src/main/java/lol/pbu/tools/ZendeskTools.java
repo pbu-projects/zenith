@@ -118,16 +118,26 @@ public class ZendeskTools {
         return ticketClient.getTicketCount().block();
     }
 
-    @Tool(description = "Search Zendesk using Zendesk search syntax (e.g. 'type:ticket status:open', 'type:ticket created>2026-01-01')")
+    @Tool(description = "Search Zendesk using Zendesk search syntax (e.g. 'type:ticket status:open', 'type:ticket created>2026-01-01'). Supports sideloading related resources (users, organizations, groups) via 'include'.")
     public SearchResponse search(
             @ToolArg(description = "Zendesk search query string") String query,
+            @ToolArg(description = "Optional resources to sideload. E.g. 'users,organizations,groups' (auto-wrapped in tickets(...)) or explicit 'tickets(users,organizations)'") @Nullable String include,
             @ToolArg(description = "Page number (1-based, default 1)") @Nullable Integer page,
             @ToolArg(description = "Number of results per page (default 25, max 100)") @Nullable Integer perPage
     ) {
         int p = (page != null && page > 0) ? page : 1;
         int size = (perPage != null && perPage > 0) ? Math.min(perPage, 100) : 25;
-        log.info("MCP Tool called: search(query='{}', page={}, perPage={})", query, p, size);
-        return searchClient.list(query, null, null, p, size).block();
+        String resolvedInclude = null;
+        if (StringUtils.isNotEmpty(include)) {
+            String trimmed = include.trim();
+            if (!trimmed.contains("(")) {
+                resolvedInclude = "tickets(" + trimmed + ")";
+            } else {
+                resolvedInclude = trimmed;
+            }
+        }
+        log.info("MCP Tool called: search(query='{}', include='{}', page={}, perPage={})", query, resolvedInclude, p, size);
+        return searchClient.list(query, resolvedInclude, null, null, p, size).block();
     }
 
     @Tool(description = "Get the count of search results matching a query in Zendesk")
@@ -457,5 +467,65 @@ public class ZendeskTools {
     ) {
         log.info("MCP Tool called: searchCustomObjectRecords(key='{}', query='{}')", customObjectKey, query);
         return customObjectRecordsClient.searchCustomObjectRecords(customObjectKey, query).block();
+    }
+
+    @Tool(description = "Get full audit event history for a ticket, including field changes, comments, notifications, and trigger/business rule executions (via via.channel='rule', via.source.rel='trigger', via.source.from.title)")
+    public TicketAuditsResponse getTicketAudits(
+            @ToolArg(description = "The numeric ticket ID") Long ticketId
+    ) {
+        log.info("MCP Tool called: getTicketAudits(id={})", ticketId);
+        return ticketClient.listAuditsForTicket(ticketId).block();
+    }
+
+    @Tool(description = "Get operational guidance and best practices for Zendesk administration, API usage, rate limit quotas, search sideloading, ticket audit/trigger debugging, and batch operations")
+    public String getBestPractices(
+            @ToolArg(description = "Topic: 'all', 'rate_limits', 'search_sideloading', 'trigger_debugging', 'batch_operations', 'attachments'") @Nullable String topic
+    ) {
+        log.info("MCP Tool called: getBestPractices(topic='{}')", topic);
+        String selectedTopic = (topic != null && !topic.isBlank()) ? topic.trim().toLowerCase() : "all";
+        StringBuilder sb = new StringBuilder();
+
+        if ("all".equals(selectedTopic) || "rate_limits".equals(selectedTopic)) {
+            sb.append("## Rate Limits & Quota Management\n")
+              .append("- Zendesk enforces both global per-minute quotas and endpoint-specific rate limits.\n")
+              .append("- Global headers: `ratelimit-remaining`, `ratelimit-limit`, `ratelimit-reset`.\n")
+              .append("- Endpoint-specific headers: `zendesk-ratelimit-<endpoint>` (e.g. `zendesk-ratelimit-search-index` with 2,500/min quota; `zendesk-ratelimit-tickets-index` with 100,000/min quota).\n")
+              .append("- Search is limited separately and more strictly (2,500/min) than ticket operations.\n")
+              .append("- On HTTP 429 errors, inspect the `Retry-After` header and back off with exponential jitter before retrying.\n\n");
+        }
+
+        if ("all".equals(selectedTopic) || "search_sideloading".equals(selectedTopic)) {
+            sb.append("## Search & Sideloading\n")
+              .append("- Zendesk Search requires scoped syntax for sideloading, e.g. `include=tickets(users,organizations,groups)`.\n")
+              .append("- The `search` MCP tool automatically wraps simple comma-separated lists (e.g. `users,organizations`) in `tickets(...)`.\n")
+              .append("- Always sideload related users or organizations when performing batch searches to avoid N+1 API calls.\n\n");
+        }
+
+        if ("all".equals(selectedTopic) || "trigger_debugging".equals(selectedTopic)) {
+            sb.append("## Ticket Audits & Trigger/Automation Debugging\n")
+              .append("- Call `getTicketAudits(ticketId)` to view the chronological audit history and identify why a ticket changed.\n")
+              .append("- In each audit event:\n")
+              .append("  - `via.channel == \"rule\"` indicates a business rule executed.\n")
+              .append("  - `via.source.rel == \"trigger\"` indicates a trigger fired.\n")
+              .append("  - `via.source.from.title` provides the name/title of the trigger that executed.\n")
+              .append("  - `via.source.from.id` provides the unique trigger ID.\n")
+              .append("  - `field_name`, `value`, and `previous_value` reveal the precise changes applied by the trigger.\n")
+              .append("  - Notification events reveal email recipients and subject lines generated.\n\n");
+        }
+
+        if ("all".equals(selectedTopic) || "batch_operations".equals(selectedTopic)) {
+            sb.append("## Batch Ticket Updates\n")
+              .append("- Use `batchUpdateTickets` for updating up to 100 tickets simultaneously rather than invoking `updateTicket` in a loop.\n")
+              .append("- The tool returns a `BatchUpdateResponse` detailing the status of each ticket ID.\n")
+              .append("- If an asynchronous job ID is returned, use `getJobStatus(jobId)` to monitor completion.\n\n");
+        }
+
+        if ("all".equals(selectedTopic) || "attachments".equals(selectedTopic)) {
+            sb.append("## Attachments & File Uploads\n")
+              .append("- Attachments can be uploaded directly via `uploadAttachment` using a local file path.\n")
+              .append("- Alternatively, pass `attachmentFilePaths` directly to `createTicket`, `updateTicket`, or `batchUpdateTickets` to automatically upload and link files in a single call.\n\n");
+        }
+
+        return sb.toString().trim();
     }
 }
