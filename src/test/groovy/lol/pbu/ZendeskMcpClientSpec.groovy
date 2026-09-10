@@ -122,7 +122,10 @@ class ZendeskMcpClientSpec extends Specification {
                 "getCustomObject",
                 "listCustomObjectRecords",
                 "getCustomObjectRecord",
-                "searchCustomObjectRecords"
+                "searchCustomObjectRecords",
+                "uploadAttachment",
+                "batchUpdateTickets",
+                "getJobStatus"
         ])
     }
 
@@ -191,6 +194,42 @@ class ZendeskMcpClientSpec extends Specification {
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("listCustomObjects", [:]))
 
         then: "custom objects are returned over the MCP protocol"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+    }
+
+    def "9. MCP Client invokes uploadAttachment tool over STDIO protocol"() {
+        given: "a temporary file on disk"
+        File tempFile = File.createTempFile("mcp-upload-", ".txt")
+        tempFile.text = "MCP client attachment upload test"
+
+        when: "client calls uploadAttachment tool"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("uploadAttachment", [
+                filePath: tempFile.absolutePath,
+                filename: "mcp-attachment.txt"
+        ]))
+
+        then: "upload succeeds and returns upload token"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+
+        cleanup:
+        tempFile?.delete()
+    }
+
+    def "10. MCP Client invokes batchUpdateTickets tool over STDIO protocol"() {
+        when: "client calls batchUpdateTickets tool"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("batchUpdateTickets", [
+                ticketIds: [7L],
+                comment: "STDIO batch update test comment",
+                isPublic: false
+        ]))
+
+        then: "batch update completes and returns result list"
         result != null
         !Boolean.TRUE.equals(result.isError())
         result.content() != null

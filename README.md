@@ -45,8 +45,11 @@ Add to your MCP client config:
 * `getTicketCount`: Fetch ticket counts.
 * `search`: Search Zendesk (`type:ticket ...`).
 * `searchCount`: Count search results.
-* `createTicket`: Create ticket.
-* `updateTicket`: Update ticket comment, status, or priority.
+* `createTicket`: Create ticket (supports subject, comment, status, priority, and attachments).
+* `updateTicket`: Update ticket comment, status, priority, or attachments.
+* `uploadAttachment`: Upload local file or image and receive an upload token to attach to tickets.
+* `batchUpdateTickets`: Batch update multiple tickets concurrently or asynchronously via Zendesk bulk job.
+* `getJobStatus`: Fetch status and progress of an asynchronous Zendesk background job by ID.
 * `listTicketFields`: List all active ticket fields.
 * `getTicketField`: Fetch ticket field by ID (schema discovery).
 * `listTicketForms`: List all ticket forms.

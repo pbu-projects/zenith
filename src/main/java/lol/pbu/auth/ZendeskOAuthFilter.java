@@ -26,7 +26,9 @@ public class ZendeskOAuthFilter {
             log.debug("Attaching OAuth Bearer token to Zendesk request: {}", request.getUri());
             request.bearerAuth(token);
         });
-        request.header("Content-Type", "application/json");
+        if (request.getContentType().isEmpty()) {
+            request.header("Content-Type", "application/json");
+        }
         request.header("Accept", "application/json");
     }
 }
