@@ -56,6 +56,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Compile Native Binary
+        env:
+          ZENDESK_URL: ${{ secrets.ZENDESK_URL }}
+          ZENDESK_CLIENT_ID: ${{ secrets.ZENDESK_CLIENT_ID }}
+          ZENDESK_CLIENT_SECRET: ${{ secrets.ZENDESK_CLIENT_SECRET }}
+          ZENDESK_OAUTH_SCOPE: ${{ secrets.ZENDESK_OAUTH_SCOPE }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             export GRADLE_OPTS="-Djava.io.tmpdir=${RUNNER_TEMP//\\//}"

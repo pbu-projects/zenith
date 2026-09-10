@@ -6,7 +6,6 @@ import io.modelcontextprotocol.client.McpSyncClient
 import io.modelcontextprotocol.client.transport.ServerParameters
 import io.modelcontextprotocol.client.transport.StdioClientTransport
 import io.modelcontextprotocol.spec.McpSchema
-import org.opentest4j.TestAbortedException
 import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Stepwise
@@ -26,9 +25,6 @@ class ZendeskMcpClientSpec extends Specification {
 
     @Shared
     String binaryPath
-
-    @Shared
-    boolean hasCredentials
 
     def setupSpec() {
         def isWindows = System.getProperty("os.name", "").toLowerCase().contains("win")
@@ -55,7 +51,12 @@ class ZendeskMcpClientSpec extends Specification {
             }
         }
 
-        hasCredentials = (envMap.get("ZENDESK_CLIENT_ID") && envMap.get("ZENDESK_CLIENT_SECRET")) || envMap.get("ZENDESK_OAUTH_TOKEN")
+        // Enforce that live Zendesk environment credentials are configured
+        def zendeskUrl = envMap.get("ZENDESK_URL")
+        def hasAuth = (envMap.get("ZENDESK_CLIENT_ID") && envMap.get("ZENDESK_CLIENT_SECRET")) || envMap.get("ZENDESK_OAUTH_TOKEN")
+        if (!zendeskUrl || !hasAuth) {
+            throw new IllegalStateException("A live Zendesk sandbox environment is strictly required for tests. Please configure ZENDESK_URL and credentials in .env or environment variables.")
+        }
 
         def serverParams = ServerParameters.builder(binaryPath)
                 .env(envMap)
@@ -117,9 +118,6 @@ class ZendeskMcpClientSpec extends Specification {
     }
 
     def "3. MCP Client invokes getTicketCount tool over STDIO protocol"() {
-        given:
-        if (!hasCredentials) throw new TestAbortedException("Zendesk credentials not configured")
-
         when: "client invokes getTicketCount tool"
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("getTicketCount", [:]))
 
@@ -131,9 +129,6 @@ class ZendeskMcpClientSpec extends Specification {
     }
 
     def "4. MCP Client invokes search tool over STDIO protocol"() {
-        given:
-        if (!hasCredentials) throw new TestAbortedException("Zendesk credentials not configured")
-
         when: "client searches tickets using Zendesk search syntax"
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("search", [
                 query: "type:ticket",
@@ -148,9 +143,6 @@ class ZendeskMcpClientSpec extends Specification {
     }
 
     def "5. MCP Client invokes listTicketFields tool over STDIO protocol"() {
-        given:
-        if (!hasCredentials) throw new TestAbortedException("Zendesk credentials not configured")
-
         when: "client requests ticket fields schema"
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("listTicketFields", [:]))
 

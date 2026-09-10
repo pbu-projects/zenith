@@ -47,3 +47,7 @@ Add to your MCP client config:
 * `createTicket`: Create ticket.
 * `updateTicket`: Update ticket comment, status, or priority.
 * `listTicketFields`: List ticket fields.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

@@ -20,27 +20,22 @@ class ZenithSpec extends Specification {
         application.running
     }
 
-    void 'test zendesk tools if oauth configured'() {
-        given:
-        def configured = System.getenv("ZENDESK_OAUTH_TOKEN") ||
-                (System.getenv("ZENDESK_CLIENT_ID") && System.getenv("ZENDESK_CLIENT_SECRET")) ||
-                System.getProperty("micronaut.http.services.zendesk.oauth.token") ||
-                (System.getProperty("micronaut.http.services.zendesk.oauth.client-id") && System.getProperty("micronaut.http.services.zendesk.oauth.client-secret"))
-
+    void 'test zendesk tools against live instance'() {
         when:
-        if (configured) {
-            def countResult = zendeskTools.getTicketCount()
-            assert countResult != null
-            assert countResult.count.value != null
-
-            def ticketResult = zendeskTools.getTicket(7L)
-            assert ticketResult != null
-            assert ticketResult.ticket != null
-            assert ticketResult.ticket.id == 7L
-        }
+        def countResult = zendeskTools.getTicketCount()
 
         then:
-        noExceptionThrown()
+        countResult != null
+        countResult.count != null
+        countResult.count.value != null
+
+        when:
+        def ticketResult = zendeskTools.getTicket(7L)
+
+        then:
+        ticketResult != null
+        ticketResult.ticket != null
+        ticketResult.ticket.id == 7L
     }
 
 }
