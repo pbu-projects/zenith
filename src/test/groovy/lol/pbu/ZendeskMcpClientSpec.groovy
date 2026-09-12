@@ -93,7 +93,7 @@ class ZendeskMcpClientSpec extends Specification {
         initResult != null
         initResult.serverInfo != null
         initResult.serverInfo.name == "zenith-zendesk-mcp"
-        initResult.serverInfo.version == "0.1.0"
+        initResult.serverInfo.version == "0.0.3"
         initResult.capabilities != null
         initResult.capabilities.tools != null
     }
