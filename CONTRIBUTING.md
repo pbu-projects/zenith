@@ -5,12 +5,33 @@ By participating in this project, you agree to abide by our
 
 Thank you for contributing to Zenith! Below are guidelines, instructions, and standards for contributing to this project.
 
+## Where to Contribute
+Looking for opportunities to help? Check out our active development priorities:
+* **[Zenith & z4j Platform Roadmap](https://github.com/orgs/pbu-projects/projects/2)**: Our central GitHub Project board tracking overarching features and goals across both repositories.
+* **[Repository Issues](https://github.com/pbu-projects/zenith/issues)**: Browse our open issues for bugs, enhancements, and "good first issue" opportunities specific to the MCP server.
+
 ---
 
 ## Style Guide
 
+For an in-depth understanding of the target personas and design philosophy driving this project, refer to the [Target Personas](docs/personas.adoc) documentation.
+
 - This project follows [Google's Java Style Guide](https://google.github.io/styleguide/javaguide.html).
 - We follow (and enforce) [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`).
+
+### AI Token Efficiency
+- Design MCP capabilities to minimize unnecessary token consumption. Rather than forcing the AI to expend tokens on tool calls to read static instructions or operational guidelines, expose this static context natively via MCP `@Resource` annotations. Keep tool descriptions concise but comprehensive to ensure the AI knows exactly what context is available without querying for it.
+
+### MCP Tool Development Rules
+
+1. **No Fake Tools:** Do not create tools that solely return static text or instructions.
+2. **Never Swallow Errors:** Throw explicit exceptions for invalid inputs so the LLM receives actionable feedback.
+3. **No Arbitrary File Reads:** Strictly validate and restrict all file paths passed to tools.
+4. **Don't Block Reactive Streams:** Return reactive types directly instead of calling `.block()` inside tool methods.
+5. **No Serialization Hacks:** Fix JSON deserialization at the framework layer instead of downgrading to `Object` to sniff types.
+6. **DRY:** Extract duplicated logic into shared utility methods.
+7. **Upstream Fixes:** If a bug or limitation exists at the API wrapper layer, open an issue in the `z4j` repository rather than hacking around it here.
+8. **Task-Oriented Design:** Tools must fulfill holistic needs rather than merely wrapping API endpoints 1-to-1. For example, provide tools like "get N tickets" that internally handle pagination and 429 rate limits, rather than forcing the AI to orchestrate paginated fetches.
 
 ---
 

@@ -1,0 +1,23 @@
+= Target Personas
+:toc:
+
+== Persona: The Automated Zendesk Administrator
+
+* **Quote:** "Doing bulk updates via the API is a nightmare because of the rate limits, and pagination changes constantly break our scripts." (Synthesized from [r/Zendesk discussions](https://www.reddit.com/r/Zendesk) and [Zendesk Support Community](https://support.zendesk.com/hc/en-us/community/topics))
+* **Role / Context:** An autonomous or semi-autonomous AI agent operating on behalf of a human Zendesk Administrator. Operates within massive, complex Zendesk instances containing thousands of triggers, custom objects, and users.
+
+=== Goals & Tasks
+* **Diagnose configuration issues:** Quickly identify misconfigured routing triggers or failing automations without manually parsing audit logs (a frequent pain point cited on r/Zendesk).
+* **Bulk Operations:** Perform bulk operations across all default Zendesk entities (Tickets, Users, Organizations, Groups, Custom Objects) efficiently.
+* **Summarization:** Summarize massive ticket volumes to identify recurring issues or systemic outages.
+
+=== Pain Points & Frustrations
+* **Rate Limits:** Constant frustration with hitting global (e.g., 700 RPM) and endpoint-specific rate limits during bulk updates (widely documented on Zendesk Support Community).
+* **Pagination Complexity:** The shift from offset-based to cursor-based pagination forces administrators to constantly rewrite and manually orchestrate data fetching scripts.
+* **Trigger Auditing:** Tracing why a ticket was routed incorrectly requires manually reading through dense, verbose ticket audit logs—a major usability complaint on r/Zendesk.
+* **Silent Failures:** Standard API tools often swallow errors or fail to return actionable feedback when updating enums (like priority/status), leaving admins blind to failures.
+
+=== Environmental Context
+* Bound by strict API rate limits and quotas heavily discussed in Zendesk developer forums.
+* Requires highly efficient, token-conservative interactions.
+* Interacts exclusively via the Model Context Protocol (MCP) using STDIO.
