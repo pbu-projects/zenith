@@ -5,7 +5,7 @@ micronaut:
     server:
       info:
         name: zenith-zendesk-mcp
-        version: 0.1.0
+        version: "@zenithVersion@"
       transport: STDIO
   http:
     services:
