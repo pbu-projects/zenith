@@ -127,7 +127,7 @@ class ZendeskMcpClientSpec extends Specification {
                 "batchUpdateTickets",
                 "getJobStatus",
                 "getTicketAudits",
-                "getBestPractices"
+                "getToolVersion"
         ])
     }
 
@@ -246,19 +246,6 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "ticket audits are returned over MCP protocol"
-        result != null
-        !Boolean.TRUE.equals(result.isError())
-        result.content() != null
-        !result.content().isEmpty()
-    }
-
-    def "12. MCP Client invokes getBestPractices tool over STDIO protocol"() {
-        when: "client calls getBestPractices tool"
-        def result = mcpClient.callTool(new McpSchema.CallToolRequest("getBestPractices", [
-                topic: "all"
-        ]))
-
-        then: "operational documentation is returned over MCP protocol"
         result != null
         !Boolean.TRUE.equals(result.isError())
         result.content() != null
