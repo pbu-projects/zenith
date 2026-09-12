@@ -7,7 +7,7 @@ Thank you for contributing to Zenith! Below are guidelines, instructions, and st
 
 ## Where to Contribute
 Looking for opportunities to help? Check out our active development priorities:
-* <!-- lychee-ignore --> **[Zenith & z4j Platform Roadmap](https://github.com/orgs/pbu-projects/projects/2)**: Our central GitHub Project board tracking overarching features and goals across both repositories.
+* **[Zenith & z4j Platform Roadmap](https://github.com/orgs/pbu-projects/projects/2)**: Our central GitHub Project board tracking overarching features and goals across both repositories.
 * **[Repository Issues](https://github.com/pbu-projects/zenith/issues)**: Browse our open issues for bugs, enhancements, and "good first issue" opportunities specific to the MCP server.
 
 ---
