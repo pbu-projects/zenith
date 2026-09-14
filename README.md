@@ -51,7 +51,6 @@ Add to your MCP client config:
 * `batchUpdateTickets`: Batch update multiple tickets concurrently or asynchronously via Zendesk bulk job.
 * `getJobStatus`: Fetch status and progress of an asynchronous Zendesk background job by ID.
 * `getTicketAudits`: Fetch full audit event history for a ticket (field changes, comments, notifications, and trigger/business rule executions).
-* `getBestPractices`: Operational guidance, rate limit quotas, search sideloading syntax, and trigger debugging best practices.
 * `listTicketFields`: List all active ticket fields.
 * `getTicketField`: Fetch ticket field by ID (schema discovery).
 * `listTicketForms`: List all ticket forms.
@@ -61,6 +60,11 @@ Add to your MCP client config:
 * `listCustomObjectRecords`: List records for a custom object.
 * `getCustomObjectRecord`: Fetch a specific custom object record by ID.
 * `searchCustomObjectRecords`: Search custom object records matching query text.
+* `getToolVersion`: Get the version of the MCP server.
+
+## Resources
+
+* `zendesk-best-practices` (`docs://zendesk/best-practices`): Operational guidance and best practices for Zendesk administration, API usage, rate limit quotas, search sideloading, ticket audit/trigger debugging, and batch operations.
 
 ## Contributing
 

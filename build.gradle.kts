@@ -1,3 +1,6 @@
+import org.apache.tools.ant.filters.ReplaceTokens
+import java.util.*
+
 plugins {
     id("groovy") 
     id("io.micronaut.application") version "5.0.2"
@@ -5,7 +8,7 @@ plugins {
     id("io.micronaut.aot") version "5.0.2"
 }
 
-version = "0.1"
+version = project.properties["zenithVersion"]!!
 group = "lol.pbu"
 
 
@@ -110,6 +113,10 @@ tasks.named("test") {
     dependsOn("installDist")
 }
 
-
-
-
+tasks.withType<ProcessResources> {
+    val props = Properties()
+    file("gradle.properties").inputStream().use { props.load(it) }
+    filesMatching("**/application.yml") {
+        filter(mapOf("tokens" to props), ReplaceTokens::class.java)
+    }
+}
