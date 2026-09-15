@@ -146,7 +146,7 @@ class ZendeskMcpClientSpec extends Specification {
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("search", [
                 query: "type:ticket",
                 include: "users,organizations",
-                perPage: 2
+                maxResults: 2
         ]))
 
         then: "search results are returned over the MCP protocol"

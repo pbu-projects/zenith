@@ -120,13 +120,11 @@ public class ZendeskTools {
     public SearchResponse search(
             @ToolArg(description = "Zendesk search query string") String query,
             @ToolArg(description = "Optional resources to sideload. E.g. 'users,organizations,groups' (auto-wrapped in tickets(...)) or explicit 'tickets(users,organizations)'") @Nullable String include,
-            @ToolArg(description = "Page number (1-based, default 1)") @Nullable Integer page,
-            @ToolArg(description = "Number of results per page (default 25, max 100)") @Nullable Integer perPage
+            @ToolArg(description = "Maximum number of results to return (default 25)") @Nullable Integer maxResults
     ) {
-        int p = (page != null && page > 0) ? page : 1;
-        int size = (perPage != null && perPage > 0) ? Math.min(perPage, 100) : 25;
+        int limit = (maxResults != null && maxResults > 0) ? maxResults : 25;
         String resolvedInclude = null;
-        if (StringUtils.isNotEmpty(include)) {
+        if (io.micronaut.core.util.StringUtils.isNotEmpty(include)) {
             String trimmed = include.trim();
             if (!trimmed.contains("(")) {
                 resolvedInclude = "tickets(" + trimmed + ")";
@@ -134,8 +132,44 @@ public class ZendeskTools {
                 resolvedInclude = trimmed;
             }
         }
-        log.info("MCP Tool called: search(query='{}', include='{}', page={}, perPage={})", query, resolvedInclude, p, size);
-        return searchClient.list(query, resolvedInclude, null, null, p, size).block();
+        log.info("MCP Tool called: search(query='{}', include='{}', maxResults={})", query, resolvedInclude, limit);
+
+        SearchResponse accumulatedResponse = new SearchResponse();
+        accumulatedResponse.setResults(new java.util.ArrayList<>());
+        accumulatedResponse.setUsers(new java.util.ArrayList<>());
+        accumulatedResponse.setOrganizations(new java.util.ArrayList<>());
+        accumulatedResponse.setGroups(new java.util.ArrayList<>());
+
+        int p = 1;
+        while (accumulatedResponse.getResults().size() < limit) {
+            int size = Math.min(limit - accumulatedResponse.getResults().size(), 100);
+
+            SearchResponse pageResponse = searchClient.list(query, resolvedInclude, null, null, p, 100)
+                    .retryWhen(reactor.util.retry.Retry.backoff(5, java.time.Duration.ofSeconds(2))
+                            .filter(throwable -> throwable.getMessage() != null && throwable.getMessage().contains("429")))
+                    .block();
+
+            if (pageResponse == null || pageResponse.getResults() == null || pageResponse.getResults().isEmpty()) {
+                break;
+            }
+
+            accumulatedResponse.getResults().addAll(pageResponse.getResults());
+            if (pageResponse.getUsers() != null) accumulatedResponse.getUsers().addAll(pageResponse.getUsers());
+            if (pageResponse.getOrganizations() != null) accumulatedResponse.getOrganizations().addAll(pageResponse.getOrganizations());
+            if (pageResponse.getGroups() != null) accumulatedResponse.getGroups().addAll(pageResponse.getGroups());
+
+            if (pageResponse.getNextPage() == null) {
+                break;
+            }
+            p++;
+        }
+
+        if (accumulatedResponse.getResults().size() > limit) {
+            accumulatedResponse.setResults(accumulatedResponse.getResults().subList(0, limit));
+        }
+        accumulatedResponse.setCount(accumulatedResponse.getResults().size());
+
+        return accumulatedResponse;
     }
 
     @Tool(description = "Get the count of search results matching a query in Zendesk")
