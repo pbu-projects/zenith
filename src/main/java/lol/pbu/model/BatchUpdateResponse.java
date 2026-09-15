@@ -31,6 +31,7 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record BatchUpdateResponse(
         @Nullable @JsonProperty("job_status") JobStatus jobStatus,
+        @Nullable @JsonProperty("job_statuses") List<JobStatus> jobStatuses,
         @Nullable @JsonProperty("results") List<TicketUpdateResult> results
 ) {
 

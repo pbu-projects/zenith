@@ -96,10 +96,7 @@ public class ZendeskTools {
         List<Ticket> tickets = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> ticketClient.showTicket(id)
                         .map(TicketResponse::getTicket)
-                        .onErrorResume(e -> {
-                            log.warn("Failed to fetch ticket {}: {}", id, e.getMessage());
-                            return Mono.empty();
-                        }), 10)
+                        .switchIfEmpty(Mono.error(new RuntimeException("Failed to fetch ticket or ticket not found: " + id))), 10)
                 .collectList()
                 .block();
 
@@ -342,7 +339,7 @@ public class ZendeskTools {
     ) {
         log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={})", ticketIds, asyncBulk);
         if (ticketIds == null || ticketIds.isEmpty()) {
-            return new BatchUpdateResponse(null, Collections.emptyList());
+            return new BatchUpdateResponse(null, null, Collections.emptyList());
         }
 
         List<?> rawIds = ticketIds;
@@ -387,9 +384,16 @@ public class ZendeskTools {
                 input.setType(TicketUpdateInputType.INCIDENT);
             }
 
-            String idsStr = distinctIds.stream().map(Object::toString).collect(Collectors.joining(","));
-            JobStatusResponse jobResponse = ticketClient.updateManyTickets(idsStr, new TicketUpdateRequest(input)).block();
-            return new BatchUpdateResponse(jobResponse != null ? jobResponse.getJobStatus() : null, null);
+            List<lol.pbu.z4j.model.JobStatus> jobStatuses = new java.util.ArrayList<>();
+            for (int i = 0; i < distinctIds.size(); i += 100) {
+                List<Long> chunk = distinctIds.subList(i, Math.min(distinctIds.size(), i + 100));
+                String idsStr = chunk.stream().map(Object::toString).collect(Collectors.joining(","));
+                JobStatusResponse jobResponse = ticketClient.updateManyTickets(idsStr, new TicketUpdateRequest(input)).block();
+                if (jobResponse != null && jobResponse.getJobStatus() != null) {
+                    jobStatuses.add(jobResponse.getJobStatus());
+                }
+            }
+            return new BatchUpdateResponse(jobStatuses.size() == 1 ? jobStatuses.get(0) : null, jobStatuses.isEmpty() ? null : jobStatuses, null);
         }
 
         // Concurrent immediate updates via Reactor Flux
@@ -419,7 +423,7 @@ public class ZendeskTools {
                 .collectList()
                 .block();
 
-        return new BatchUpdateResponse(null, results != null ? results : Collections.emptyList());
+        return new BatchUpdateResponse(null, null, results != null ? results : Collections.emptyList());
     }
     @Tool(description = "Get status and progress of an asynchronous Zendesk background job by its job ID")
     public JobStatusResponse getJobStatus(
