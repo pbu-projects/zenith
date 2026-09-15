@@ -126,8 +126,7 @@ class ZendeskMcpClientSpec extends Specification {
                 "uploadAttachment",
                 "batchUpdateTickets",
                 "getJobStatus",
-                "getTicketAudits",
-                "getToolVersion"
+                "getTicketAudits"
         ])
     }
 
