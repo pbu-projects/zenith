@@ -214,20 +214,9 @@ public class ZendeskTools {
         return ticketClient.createTicket(new TicketCreateRequest(input)).block();
     }
 
-    @Tool(description = "Update an existing Zendesk ticket with a comment, status, priority, or attachments")
-    public TicketUpdateResponse updateTicket(
-            @ToolArg(description = "The numeric ticket ID to update") Long ticketId,
-            @ToolArg(description = "Comment text to add to the ticket") @Nullable String comment,
-            @ToolArg(description = "New status: new, open, pending, hold, solved, closed") @Nullable String status,
-            @ToolArg(description = "New priority: urgent, high, normal, low") @Nullable String priority,
-            @ToolArg(description = "Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
-            @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
-            @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths
-    ) {
-        log.info("MCP Tool called: updateTicket(id={})", ticketId);
-        TicketUpdateInput input = new TicketUpdateInput();
-        List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
 
+    private TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens) {
+        TicketUpdateInput input = new TicketUpdateInput();
         if (StringUtils.isNotEmpty(comment) || !tokens.isEmpty()) {
             TicketComment ticketComment = new TicketComment();
             if (StringUtils.isNotEmpty(comment)) {
@@ -255,32 +244,69 @@ public class ZendeskTools {
                 log.warn("Unknown priority '{}', ignoring", priority);
             }
         }
+        return input;
+    }
+
+    private void validateProblemTarget(Long problemId) {
+        if (problemId == null) return;
+        try {
+            Ticket problemTicket = ticketClient.showTicket(problemId).block().getTicket();
+            if (problemTicket.getType() != TicketType.PROBLEM) {
+                throw new IllegalArgumentException("Target ticket #" + problemId + " is not of type 'problem'");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Target problem ticket #" + problemId + " could not be retrieved. Does it exist?");
+        }
+    }
+
+    private void applyProblemIdLogic(Ticket currentTicket, TicketUpdateInput input, Long problemId, Boolean convertToIncident) {
+        if (problemId == null) return;
+        TicketType currentType = currentTicket.getType();
+        boolean isProblemParent = currentType == TicketType.PROBLEM && Boolean.TRUE.equals(currentTicket.getHasIncidents());
+        
+        if (isProblemParent) {
+            throw new IllegalArgumentException("ticket #" + currentTicket.getId() + " is a parent problem with linked incidents — reassign or resolve those first");
+        }
+        
+        if (currentType != TicketType.INCIDENT) {
+            if (!Boolean.TRUE.equals(convertToIncident)) {
+                throw new IllegalArgumentException("Ticket #" + currentTicket.getId() + " is not an incident. Pass convertToIncident=true to explicitly convert it.");
+            }
+            input.setType(TicketUpdateInputType.INCIDENT);
+        }
+        
+        input.setProblemId(problemId.intValue());
+    }
+
+    @Tool(description = "Update an existing Zendesk ticket with a comment, status, priority, attachments, or link to a problem ticket")
+    public TicketUpdateResponse updateTicket(
+            @ToolArg(description = "The numeric ticket ID to update") Long ticketId,
+            @ToolArg(description = "Comment text to add to the ticket") @Nullable String comment,
+            @ToolArg(description = "New status: new, open, pending, hold, solved, closed") @Nullable String status,
+            @ToolArg(description = "New priority: urgent, high, normal, low") @Nullable String priority,
+            @ToolArg(description = "Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
+            @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
+            @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
+            @ToolArg(description = "Optional ID of the parent problem ticket to link this incident to") @Nullable Long problemId,
+            @ToolArg(description = "Required if setting problemId on a ticket that is not currently an incident. Set to true to explicitly convert it.") @Nullable Boolean convertToIncident
+    ) {
+        log.info("MCP Tool called: updateTicket(id={})", ticketId);
+        List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
+        TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens);
+
+        validateProblemTarget(problemId);
+
+        if (problemId != null) {
+            Ticket currentTicket = ticketClient.showTicket(ticketId).block().getTicket();
+            applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
+        }
 
         return ticketClient.updateTicket(ticketId, new TicketUpdateRequest(input)).block();
     }
 
-    @Tool(description = "Upload a local file or image as an attachment to Zendesk, returning an upload token to attach to tickets")
-    public AttachmentUploadResponse uploadAttachment(
-            @ToolArg(description = "Path to the local file to upload") String filePath,
-            @ToolArg(description = "Optional custom filename to use in Zendesk (defaults to base name of file)") @Nullable String filename
-    ) {
-        log.info("MCP Tool called: uploadAttachment(filePath='{}', filename='{}')", filePath, filename);
-        try {
-            Path path = Path.of(filePath);
-            byte[] bytes = Files.readAllBytes(path);
-            String contentType = Files.probeContentType(path);
-            if (contentType == null) {
-                contentType = "application/octet-stream";
-            }
-            String targetFilename = StringUtils.isNotEmpty(filename) ? filename : path.getFileName().toString();
-            return attachmentClient.uploadAttachment(targetFilename, contentType, bytes).block();
-        } catch (Exception e) {
-            log.error("Failed to upload attachment from {}: {}", filePath, e.getMessage(), e);
-            throw new RuntimeException("Failed to upload attachment: " + e.getMessage(), e);
-        }
-    }
-
-    @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, or attachments. Supports concurrent immediate updates or Zendesk async bulk jobs.")
+    @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, attachments, or link to a problem ticket. Supports concurrent immediate updates or Zendesk async bulk jobs.")
     public BatchUpdateResponse batchUpdateTickets(
             @ToolArg(description = "List of numeric ticket IDs to update") List<Long> ticketIds,
             @ToolArg(description = "Comment text to add to the tickets") @Nullable String comment,
@@ -289,7 +315,9 @@ public class ZendeskTools {
             @ToolArg(description = "Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
             @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
-            @ToolArg(description = "If true, queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus. If false (default), updates tickets concurrently via Reactor returning immediate per-ticket results.") @Nullable Boolean asyncBulk
+            @ToolArg(description = "If true, queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus. If false (default), updates tickets concurrently via Reactor returning immediate per-ticket results.") @Nullable Boolean asyncBulk,
+            @ToolArg(description = "Optional ID of the parent problem ticket to link these incidents to") @Nullable Long problemId,
+            @ToolArg(description = "Required if setting problemId on tickets that are not currently incidents. Set to true to explicitly convert them.") @Nullable Boolean convertToIncident
     ) {
         log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={})", ticketIds, asyncBulk);
         if (ticketIds == null || ticketIds.isEmpty()) {
@@ -312,35 +340,30 @@ public class ZendeskTools {
         distinctIds = distinctIds.stream().distinct().toList();
 
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
+        validateProblemTarget(problemId);
 
         if (Boolean.TRUE.equals(asyncBulk)) {
-            TicketUpdateInput input = new TicketUpdateInput();
-            if (StringUtils.isNotEmpty(comment) || !tokens.isEmpty()) {
-                TicketComment ticketComment = new TicketComment();
-                if (StringUtils.isNotEmpty(comment)) {
-                    ticketComment.setBody(comment);
-                }
-                if (isPublic != null) {
-                    ticketComment.setIsPublic(isPublic);
-                }
-                if (!tokens.isEmpty()) {
-                    ticketComment.setUploads(tokens);
-                }
-                input.setComment(ticketComment);
-            }
-            if (StringUtils.isNotEmpty(status)) {
-                try {
-                    input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-                } catch (Exception e) {
-                    log.warn("Unknown status '{}', ignoring", status);
+            // Validate all target tickets first if linking to a problem
+            if (problemId != null) {
+                List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
+                        .flatMap(id -> ticketClient.showTicket(id))
+                        .map(TicketResponse::getTicket)
+                        .collectList()
+                        .block();
+                
+                if (currentTickets != null) {
+                    for (Ticket currentTicket : currentTickets) {
+                        TicketUpdateInput testInput = new TicketUpdateInput();
+                        applyProblemIdLogic(currentTicket, testInput, problemId, convertToIncident);
+                    }
                 }
             }
-            if (StringUtils.isNotEmpty(priority)) {
-                try {
-                    input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-                } catch (Exception e) {
-                    log.warn("Unknown priority '{}', ignoring", priority);
-                }
+
+            TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens);
+            
+            if (problemId != null) {
+                input.setProblemId(problemId.intValue());
+                input.setType(TicketUpdateInputType.INCIDENT);
             }
 
             String idsStr = distinctIds.stream().map(Object::toString).collect(Collectors.joining(","));
@@ -351,36 +374,21 @@ public class ZendeskTools {
         // Concurrent immediate updates via Reactor Flux
         List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
-                    TicketUpdateInput input = new TicketUpdateInput();
-                    if (StringUtils.isNotEmpty(comment) || !tokens.isEmpty()) {
-                        TicketComment ticketComment = new TicketComment();
-                        if (StringUtils.isNotEmpty(comment)) {
-                            ticketComment.setBody(comment);
-                        }
-                        if (isPublic != null) {
-                            ticketComment.setIsPublic(isPublic);
-                        }
-                        if (!tokens.isEmpty()) {
-                            ticketComment.setUploads(tokens);
-                        }
-                        input.setComment(ticketComment);
+                    TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens);
+                    
+                    Mono<TicketUpdateInput> inputMono;
+                    if (problemId != null) {
+                        inputMono = ticketClient.showTicket(id).map(resp -> {
+                            applyProblemIdLogic(resp.getTicket(), input, problemId, convertToIncident);
+                            return input;
+                        });
+                    } else {
+                        inputMono = Mono.just(input);
                     }
-                    if (StringUtils.isNotEmpty(status)) {
-                        try {
-                            input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-                        } catch (Exception e) {
-                            log.warn("Unknown status '{}', ignoring", status);
-                        }
-                    }
-                    if (StringUtils.isNotEmpty(priority)) {
-                        try {
-                            input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-                        } catch (Exception e) {
-                            log.warn("Unknown priority '{}', ignoring", priority);
-                        }
-                    }
-
-                    return ticketClient.updateTicket(id, new TicketUpdateRequest(input))
+                    
+                    return inputMono.flatMap(resolvedInput -> 
+                                ticketClient.updateTicket(id, new TicketUpdateRequest(resolvedInput))
+                            )
                             .map(resp -> new TicketUpdateResult(id, true, resp.getTicket(), null))
                             .onErrorResume(e -> {
                                 log.warn("Failed to update ticket {}: {}", id, e.getMessage());
@@ -392,7 +400,6 @@ public class ZendeskTools {
 
         return new BatchUpdateResponse(null, results != null ? results : Collections.emptyList());
     }
-
     @Tool(description = "Get status and progress of an asynchronous Zendesk background job by its job ID")
     public JobStatusResponse getJobStatus(
             @ToolArg(description = "The job status ID") String jobId
