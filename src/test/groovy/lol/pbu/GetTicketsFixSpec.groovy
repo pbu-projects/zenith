@@ -17,6 +17,6 @@ class GetTicketsFixSpec extends Specification {
 
         then:
         def e = thrown(RuntimeException)
-        e.message.contains("Failed to fetch ticket or ticket not found: 999999999")
+        e.message.contains("Failed to fetch ticket 999999999:")
     }
 }
