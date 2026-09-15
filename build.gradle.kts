@@ -120,3 +120,4 @@ tasks.withType<ProcessResources> {
         filter(mapOf("tokens" to props), ReplaceTokens::class.java)
     }
 }
+dependencies { testImplementation("org.apache.groovy:groovy-json") }

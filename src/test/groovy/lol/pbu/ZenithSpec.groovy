@@ -90,7 +90,7 @@ class ZenithSpec extends Specification {
         uploadResp.upload.attachment.fileName == "zenith-test.txt"
 
         when: "batch updating tickets concurrently"
-        def batchResp = zendeskTools.batchUpdateTickets([7L], "Batch concurrent update test", null, null, false, [uploadResp.upload.token], null, false)
+        def batchResp = zendeskTools.batchUpdateTickets([7L], "Batch concurrent update test", null, null, false, [uploadResp.upload.token], null, false, null, null)
 
         then:
         batchResp != null
@@ -99,7 +99,7 @@ class ZenithSpec extends Specification {
         batchResp.results().first().success()
 
         when: "batch updating tickets asynchronously via Zendesk bulk job"
-        def asyncBulkResp = zendeskTools.batchUpdateTickets([7L], "Batch bulk async test", null, null, false, null, null, true)
+        def asyncBulkResp = zendeskTools.batchUpdateTickets([7L], "Batch bulk async test", null, null, false, null, null, true, null, null)
 
         then:
         asyncBulkResp != null
