@@ -96,8 +96,8 @@ public class ZendeskTools {
         List<Ticket> tickets = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> ticketClient.showTicket(id)
                         .map(TicketResponse::getTicket)
-                        .switchIfEmpty(Mono.error(new RuntimeException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", id))))
-                        .onErrorMap(e -> new RuntimeException(String.format("Failed to fetch ticket %d: [%s] %s", id, e.getClass().getSimpleName(), e.getMessage()))), 10)
+                        .onErrorMap(e -> new RuntimeException(String.format("Failed to fetch ticket %d: [%s] %s", id, e.getClass().getSimpleName(), e.getMessage())))
+                        .switchIfEmpty(Mono.error(new RuntimeException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", id)))), 10)
                 .collectList()
                 .block();
 
