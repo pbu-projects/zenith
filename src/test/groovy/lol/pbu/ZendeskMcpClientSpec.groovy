@@ -251,4 +251,20 @@ class ZendeskMcpClientSpec extends Specification {
         result.content() != null
         !result.content().isEmpty()
     }
+
+
+    
+    
+    def "12. Test problem_id logic via MCP Server"() {
+        when: "We attempt to set a non-existent problemId on ticket 7"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("updateTicket", [
+                ticketId: 7L,
+                problemId: 999999999L
+        ]))
+
+        then: "It fails because the target problem ticket doesn't exist"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        System.err.println("GOT ERROR: " + e.message)
+        true
+    }
 }

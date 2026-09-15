@@ -305,6 +305,27 @@ public class ZendeskTools {
 
         return ticketClient.updateTicket(ticketId, new TicketUpdateRequest(input)).block();
     }
+    @Tool(description = "Upload a file from the local file system to Zendesk to obtain an upload token for use in createTicket, updateTicket, or batchUpdateTickets")
+    public AttachmentUploadResponse uploadAttachment(
+            @ToolArg(description = "The absolute path to the local file to upload") String filePath,
+            @ToolArg(description = "Optional filename to use for the attachment. If not provided, the local filename is used.") @Nullable String filename
+    ) {
+        log.info("MCP Tool called: uploadAttachment(filePath='{}')", filePath);
+        try {
+            Path path = Path.of(filePath);
+            byte[] bytes = Files.readAllBytes(path);
+            String contentType = Files.probeContentType(path);
+            if (contentType == null) {
+                contentType = "application/octet-stream";
+            }
+            String targetFilename = StringUtils.isNotEmpty(filename) ? filename : path.getFileName().toString();
+            return attachmentClient.uploadAttachment(targetFilename, contentType, bytes).block();
+        } catch (Exception e) {
+            log.error("Failed to upload attachment from {}: {}", filePath, e.getMessage(), e);
+            throw new RuntimeException("Failed to upload attachment: " + e.getMessage(), e);
+        }
+    }
+
 
     @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, attachments, or link to a problem ticket. Supports concurrent immediate updates or Zendesk async bulk jobs.")
     public BatchUpdateResponse batchUpdateTickets(
