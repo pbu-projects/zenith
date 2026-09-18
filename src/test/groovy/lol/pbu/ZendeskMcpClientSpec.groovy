@@ -288,4 +288,16 @@ class ZendeskMcpClientSpec extends Specification {
         def e = thrown(io.modelcontextprotocol.spec.McpError)
         true
     }
+
+    def "15. Test updateTicket requires isPublic when comment is provided"() {
+        when: "client provides a comment but omits isPublic"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("updateTicket", [
+                ticketId: 7L,
+                comment: "This should fail because isPublic is missing"
+        ]))
+
+        then: "it fails requiring isPublic"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        true
+    }
 }
