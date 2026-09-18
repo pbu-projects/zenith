@@ -288,13 +288,14 @@ public class ZendeskTools {
     private TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
         TicketUpdateInput input = new TicketUpdateInput();
         if (StringUtils.isNotEmpty(comment) || !tokens.isEmpty()) {
+            if (isPublic == null) {
+                throw new IllegalArgumentException("isPublic is required when a comment or attachment is provided. Set to true for a public reply, or false for an internal note.");
+            }
             TicketComment ticketComment = new TicketComment();
             if (StringUtils.isNotEmpty(comment)) {
                 ticketComment.setBody(comment);
             }
-            if (isPublic != null) {
-                ticketComment.setIsPublic(isPublic);
-            }
+            ticketComment.setIsPublic(isPublic);
             if (!tokens.isEmpty()) {
                 ticketComment.setUploads(tokens);
             }
@@ -357,7 +358,7 @@ public class ZendeskTools {
             @ToolArg(description = "Comment text to add to the ticket") @Nullable String comment,
             @ToolArg(description = "New status: new, open, pending, hold, solved, closed") @Nullable String status,
             @ToolArg(description = "New priority: urgent, high, normal, low") @Nullable String priority,
-            @ToolArg(description = "Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
+            @ToolArg(description = "Required if a comment or attachment is provided. Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
             @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
             @ToolArg(description = "Optional ID of the parent problem ticket to link this incident to") @Nullable Long problemId,
@@ -408,7 +409,7 @@ public class ZendeskTools {
             @ToolArg(description = "Comment text to add to the tickets") @Nullable String comment,
             @ToolArg(description = "New status: new, open, pending, hold, solved, closed") @Nullable String status,
             @ToolArg(description = "New priority: urgent, high, normal, low") @Nullable String priority,
-            @ToolArg(description = "Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
+            @ToolArg(description = "Required if a comment or attachment is provided. Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
             @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
             @ToolArg(description = "If true, queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus. If false (default), updates tickets concurrently via Reactor returning immediate per-ticket results.") @Nullable Boolean asyncBulk,
