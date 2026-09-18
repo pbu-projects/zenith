@@ -26,6 +26,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.Arrays;
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
+import lol.pbu.z4j.model.TicketCustomField;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -122,6 +128,9 @@ public class ZendeskTools {
             @ToolArg(description = "Optional resources to sideload. E.g. 'users,organizations,groups' (auto-wrapped in tickets(...)) or explicit 'tickets(users,organizations)'") @Nullable String include,
             @ToolArg(description = "Maximum number of results to return (default 25)") @Nullable Integer maxResults
     ) {
+        if (query != null && query.toLowerCase().contains("problem_id:")) {
+            throw new IllegalArgumentException("Zendesk search does not support filtering by problem_id. The search index does not cover this field, and queries will silently return 0 results. If you need to find incidents linked to a problem, you must retrieve tickets individually or use a different discovery mechanism.");
+        }
         int limit = (maxResults != null && maxResults > 0) ? maxResults : 25;
         String resolvedInclude = null;
         if (io.micronaut.core.util.StringUtils.isNotEmpty(include)) {
@@ -176,6 +185,9 @@ public class ZendeskTools {
     public SearchResponse searchCount(
             @ToolArg(description = "Zendesk search query string, e.g. 'type:ticket status:open'") String query
     ) {
+        if (query != null && query.toLowerCase().contains("problem_id:")) {
+            throw new IllegalArgumentException("Zendesk search does not support filtering by problem_id. The search index does not cover this field, and queries will silently return 0 results. If you need to find incidents linked to a problem, you must retrieve tickets individually or use a different discovery mechanism.");
+        }
         log.info("MCP Tool called: searchCount(query='{}')", query);
         return searchClient.count(query).block();
     }
@@ -247,7 +259,33 @@ public class ZendeskTools {
     }
 
 
-    private TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens) {
+    
+    private void validateKnownParameters(CallToolRequest request, String... knownParams) {
+        if (request == null || request.arguments() == null) return;
+        Set<String> known = new HashSet<>(Arrays.asList(knownParams));
+        for (String key : request.arguments().keySet()) {
+            if (!known.contains(key)) {
+                throw new IllegalArgumentException("Unrecognized parameter: '" + key + "'. If you meant to update a custom field, use the 'customFields' array parameter.");
+            }
+        }
+    }
+
+    private List<TicketCustomField> parseCustomFields(List<Map<String, Object>> customFields) {
+        if (customFields == null || customFields.isEmpty()) return Collections.emptyList();
+        List<TicketCustomField> result = new ArrayList<>();
+        for (Map<String, Object> cf : customFields) {
+            Object idObj = cf.get("id");
+            Object value = cf.get("value");
+            if (idObj == null) throw new IllegalArgumentException("Custom field must have an 'id'");
+            Long id;
+            if (idObj instanceof Number) id = ((Number) idObj).longValue();
+            else id = Long.parseLong(idObj.toString());
+            result.add(new TicketCustomField.Raw(id, value));
+        }
+        return result;
+    }
+
+    private TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
         TicketUpdateInput input = new TicketUpdateInput();
         if (StringUtils.isNotEmpty(comment) || !tokens.isEmpty()) {
             TicketComment ticketComment = new TicketComment();
@@ -276,6 +314,7 @@ public class ZendeskTools {
                 log.warn("Unknown priority '{}', ignoring", priority);
             }
         }
+        if (customFields != null && !customFields.isEmpty()) { input.setCustomFields(customFields); }
         return input;
     }
 
@@ -322,11 +361,15 @@ public class ZendeskTools {
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
             @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
             @ToolArg(description = "Optional ID of the parent problem ticket to link this incident to") @Nullable Long problemId,
-            @ToolArg(description = "Required if setting problemId on a ticket that is not currently an incident. Set to true to explicitly convert it.") @Nullable Boolean convertToIncident
+            @ToolArg(description = "Required if setting problemId on a ticket that is not currently an incident. Set to true to explicitly convert it.") @Nullable Boolean convertToIncident,
+            @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
+            CallToolRequest request
     ) {
         log.info("MCP Tool called: updateTicket(id={})", ticketId);
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
-        TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens);
+        validateKnownParameters(request, "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields");
+        List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
+        TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
 
         validateProblemTarget(problemId);
 
@@ -370,9 +413,12 @@ public class ZendeskTools {
             @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
             @ToolArg(description = "If true, queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus. If false (default), updates tickets concurrently via Reactor returning immediate per-ticket results.") @Nullable Boolean asyncBulk,
             @ToolArg(description = "Optional ID of the parent problem ticket to link these incidents to") @Nullable Long problemId,
-            @ToolArg(description = "Required if setting problemId on tickets that are not currently incidents. Set to true to explicitly convert them.") @Nullable Boolean convertToIncident
+            @ToolArg(description = "Required if setting problemId on tickets that are not currently incidents. Set to true to explicitly convert them.") @Nullable Boolean convertToIncident,
+            @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
+            CallToolRequest request
     ) {
         log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={})", ticketIds, asyncBulk);
+        validateKnownParameters(request, "ticketIds", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "asyncBulk", "problemId", "convertToIncident", "customFields");
         if (ticketIds == null || ticketIds.isEmpty()) {
             return new BatchUpdateResponse(null, null, Collections.emptyList());
         }
@@ -412,7 +458,8 @@ public class ZendeskTools {
                 }
             }
 
-            TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens);
+            List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
+            TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
             
             if (problemId != null) {
                 input.setProblemId(problemId.intValue());
@@ -434,7 +481,8 @@ public class ZendeskTools {
         // Concurrent immediate updates via Reactor Flux
         List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
-                    TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens);
+                    List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
+            TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
                     
                     Mono<TicketUpdateInput> inputMono;
                     if (problemId != null) {
