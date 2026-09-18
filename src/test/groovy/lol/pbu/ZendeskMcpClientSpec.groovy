@@ -266,4 +266,26 @@ class ZendeskMcpClientSpec extends Specification {
         System.err.println("GOT ERROR: " + e.message)
         true
     }
+    def "13. Test search with problem_id fails loudly"() {
+        when: "client searches tickets using problem_id"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("search", [
+                query: "type:ticket problem_id:1234"
+        ]))
+
+        then: "it fails with an informative error"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        true
+    }
+
+    def "14. Test updateTicket fails on unrecognized parameters"() {
+        when: "client passes an unrecognized parameter to updateTicket"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("updateTicket", [
+                ticketId: 7L,
+                fakeCustomFieldId: "This should fail loudly"
+        ]))
+
+        then: "it fails mentioning the unrecognized parameter"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        true
+    }
 }
