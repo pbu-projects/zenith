@@ -304,15 +304,14 @@ class ZendeskMcpClientSpec extends Specification {
 
     def "16. Test createTicket requires isPublic"() {
         when: "client provides a comment but omits isPublic"
-        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("createTicket", [
+        def result = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("createTicket", [
                 subject: "Test missing isPublic",
                 comment: "This should fail because isPublic is missing"
         ]))
 
         then: "it fails requiring isPublic"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
-        
-        true
+        result != null
+        Boolean.TRUE.equals(result.isError())
     }
 
     def "17. Test batchUpdateTickets requires isPublic when comment is provided"() {
@@ -326,5 +325,28 @@ class ZendeskMcpClientSpec extends Specification {
         def e = thrown(io.modelcontextprotocol.spec.McpError)
         
         true
+    }
+
+    def "18. Test listViews and getViewTickets"() {
+        when: "client requests views"
+        def viewsResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listViews", [:]))
+
+        then: "it succeeds"
+        viewsResult != null
+        !Boolean.TRUE.equals(viewsResult.isError())
+        viewsResult.content() != null
+        !viewsResult.content().isEmpty()
+
+        when: "client requests tickets for the first view"
+        def text = ((io.modelcontextprotocol.spec.McpSchema.TextContent) viewsResult.content().get(0)).text()
+        def viewsJson = new groovy.json.JsonSlurper().parseText(text)
+        def viewId = viewsJson.views[0].id
+        def ticketsResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("getViewTickets", [
+                viewId: viewId
+        ]))
+
+        then: "it succeeds"
+        ticketsResult != null
+        !Boolean.TRUE.equals(ticketsResult.isError())
     }
 }
