@@ -226,13 +226,18 @@ public class ZendeskTools {
     public TicketResponse createTicket(
             @ToolArg(description = "The subject of the ticket") String subject,
             @ToolArg(description = "The initial comment / description of the ticket") String comment,
+            @ToolArg(description = "Required. Whether the initial comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
             @ToolArg(description = "Priority: urgent, high, normal, low") @Nullable String priority,
             @ToolArg(description = "Status: new, open, pending, hold, solved, closed") @Nullable String status,
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
             @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths
     ) {
         log.info("MCP Tool called: createTicket(subject='{}')", subject);
+        if (isPublic == null) {
+            throw new IllegalArgumentException("isPublic is required when creating a ticket. Set to true for a public initial comment, or false for an internal note.");
+        }
         TicketComment ticketComment = new TicketComment().setBody(comment);
+        ticketComment.setIsPublic(isPublic);
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
         if (!tokens.isEmpty()) {
             ticketComment.setUploads(tokens);

@@ -298,6 +298,33 @@ class ZendeskMcpClientSpec extends Specification {
 
         then: "it fails requiring isPublic"
         def e = thrown(io.modelcontextprotocol.spec.McpError)
+        
+        true
+    }
+
+    def "16. Test createTicket requires isPublic"() {
+        when: "client provides a comment but omits isPublic"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("createTicket", [
+                subject: "Test missing isPublic",
+                comment: "This should fail because isPublic is missing"
+        ]))
+
+        then: "it fails requiring isPublic"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        
+        true
+    }
+
+    def "17. Test batchUpdateTickets requires isPublic when comment is provided"() {
+        when: "client provides a comment but omits isPublic"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("batchUpdateTickets", [
+                ticketIds: [7L, 8L],
+                comment: "This should fail because isPublic is missing"
+        ]))
+
+        then: "it fails requiring isPublic"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        
         true
     }
 }
