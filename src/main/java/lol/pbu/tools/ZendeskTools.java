@@ -11,8 +11,8 @@ import lol.pbu.z4j.client.AttachmentClient;
 import lol.pbu.z4j.client.CustomObjectRecordsClient;
 import lol.pbu.z4j.client.CustomObjectsClient;
 import lol.pbu.z4j.client.JobStatusClient;
-import lol.pbu.client.ViewsClient;
-import lol.pbu.model.ViewsResponse;
+import lol.pbu.z4j.client.ViewClient;
+import lol.pbu.z4j.model.ViewsResponse;
 import lol.pbu.z4j.client.SearchClient;
 import lol.pbu.z4j.client.TicketClient;
 import lol.pbu.z4j.client.TicketFormsClient;
@@ -52,7 +52,7 @@ public class ZendeskTools {
     private final CustomObjectRecordsClient customObjectRecordsClient;
     private final AttachmentClient attachmentClient;
     private final JobStatusClient jobStatusClient;
-    private final ViewsClient viewsClient;
+    private final ViewClient viewClient;
 
     public ZendeskTools(
             TicketClient ticketClient,
@@ -62,7 +62,7 @@ public class ZendeskTools {
             CustomObjectRecordsClient customObjectRecordsClient,
             AttachmentClient attachmentClient,
             JobStatusClient jobStatusClient,
-            ViewsClient viewsClient
+            ViewClient viewClient
     ) {
         this.ticketClient = ticketClient;
         this.searchClient = searchClient;
@@ -71,7 +71,7 @@ public class ZendeskTools {
         this.customObjectRecordsClient = customObjectRecordsClient;
         this.attachmentClient = attachmentClient;
         this.jobStatusClient = jobStatusClient;
-        this.viewsClient = viewsClient;
+        this.viewClient = viewClient;
     }
 
     @Tool(description = "Get details of a specific Zendesk ticket by its numeric ID")
@@ -231,7 +231,7 @@ public class ZendeskTools {
     public TicketResponse createTicket(
             @ToolArg(description = "The subject of the ticket") String subject,
             @ToolArg(description = "The initial comment / description of the ticket") String comment,
-            @ToolArg(description = "Required. Whether the initial comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
+            @ToolArg(description = "Required. Whether the initial comment is public (true) or private internal note (false)") Boolean isPublic,
             @ToolArg(description = "Priority: urgent, high, normal, low") @Nullable String priority,
             @ToolArg(description = "Status: new, open, pending, hold, solved, closed") @Nullable String status,
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
@@ -606,7 +606,7 @@ public class ZendeskTools {
     @Tool(description = "List all views configured in Zendesk")
     public ViewsResponse listViews() {
         log.info("MCP Tool called: listViews()");
-        return viewsClient.listViews().block();
+        return viewClient.listViews().block();
     }
 
     @Tool(description = "Get tickets from a specific Zendesk view by its numeric ID")
@@ -614,7 +614,7 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: getViewTickets(viewId={})", viewId);
-        return viewsClient.listTicketsForView(viewId).block();
+        return viewClient.listTicketsForView(viewId).block();
     }
 
 }
