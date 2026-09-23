@@ -47,11 +47,17 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         if (statusCode == 429) {
             String retryAfter = response != null ? response.header("Retry-After") : null;
             String resetSeconds = response != null ? response.header("ratelimit-reset") : null;
-            String waitTime = (retryAfter != null && !retryAfter.isBlank()) ? retryAfter : resetSeconds;
+            String waitTime = (retryAfter != null && !retryAfter.isBlank()) ? retryAfter.trim() : (resetSeconds != null ? resetSeconds.trim() : null);
 
-            String rateLimitMsg = (waitTime != null && !waitTime.isBlank())
-                    ? String.format("Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. You must wait %s seconds before sending further requests.", waitTime)
-                    : "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Please pause before retrying.";
+            String rateLimitMsg;
+            if (waitTime != null && !waitTime.isBlank()) {
+                boolean isNumeric = waitTime.chars().allMatch(Character::isDigit);
+                rateLimitMsg = isNumeric
+                        ? String.format("Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. You must wait %s seconds before sending further requests.", waitTime)
+                        : String.format("Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Retry after: %s.", waitTime);
+            } else {
+                rateLimitMsg = "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Please pause before retrying.";
+            }
 
             log.warn("Mapping HTTP 429 Rate Limit to MCP error: {}", rateLimitMsg);
 
@@ -134,6 +140,13 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             }
         } catch (Exception parseEx) {
             log.debug("Could not parse Zendesk error response body as JSON: {}", parseEx.getMessage());
+        }
+
+        if (body.startsWith("<") || body.contains("<html") || body.contains("<HTML")) {
+            return "[Non-JSON HTML error page received from gateway]";
+        }
+        if (body.length() > 500) {
+            return body.substring(0, 500) + "... [truncated]";
         }
         return body;
     }

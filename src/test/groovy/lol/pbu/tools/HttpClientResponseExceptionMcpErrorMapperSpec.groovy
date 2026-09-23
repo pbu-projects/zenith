@@ -69,4 +69,35 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
         mcpError.jsonRpcError.code == -32603
         mcpError.message.contains("Couldn't authenticate you")
     }
+
+    def "handles HTTP-date Retry-After header gracefully"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", "Fri, 31 Dec 2026 23:59:59 GMT")
+        def ex = new HttpClientResponseException("Too Many Requests", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32029
+        mcpError.message.contains("Retry after: Fri, 31 Dec 2026 23:59:59 GMT")
+        !mcpError.message.contains("seconds")
+    }
+
+    def "truncates HTML and large error bodies to protect token limits"() {
+        given:
+        def htmlBody = "<html><head><title>502 Bad Gateway</title></head><body><h1>Bad Gateway</h1><p>" + ("x" * 1000) + "</p></body></html>"
+        def response = HttpResponse.status(HttpStatus.BAD_GATEWAY)
+                .body(htmlBody)
+        def ex = new HttpClientResponseException("Bad Gateway", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32603
+        mcpError.message.contains("[Non-JSON HTML error page received from gateway]")
+        !mcpError.message.contains("<html>")
+    }
 }
