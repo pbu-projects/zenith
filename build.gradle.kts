@@ -6,6 +6,8 @@ plugins {
     id("io.micronaut.application") version "5.0.2"
     id("com.gradleup.shadow") version "9.4.1"
     id("io.micronaut.aot") version "5.0.2"
+    id("org.sonarqube") version "latest.release"
+    id("jacoco")
 }
 
 version = project.properties["zenithVersion"]!!
@@ -111,6 +113,35 @@ tasks.withType<Test>().configureEach {
 
 tasks.named("test") {
     dependsOn("installDist")
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    reports {
+        xml.required.set(true)
+    }
+}
+
+sonar {
+    properties {
+        property("sonar.projectKey", "pbu-projects_zenith")
+        property("sonar.organization", "peanutbutter-unicorn")
+        property("sonar.host.url", "https://sonarcloud.io")
+        val token = System.getenv("SONAR_TOKEN") ?: System.getenv("sonar_token") ?: run {
+            val envFile = file(".env")
+            if (envFile.exists()) {
+                envFile.readLines()
+                    .map { it.trim().removePrefix("export ").trim() }
+                    .firstOrNull { it.startsWith("SONAR_TOKEN=") }
+                    ?.substringAfter("=")
+                    ?.trim()
+                    ?.removeSurrounding("\"")
+            } else null
+        }
+        if (!token.isNullOrBlank()) {
+            property("sonar.token", token)
+        }
+    }
 }
 
 tasks.withType<ProcessResources> {
