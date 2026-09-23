@@ -440,4 +440,74 @@ class ZendeskMcpClientSpec extends Specification {
         postsResult != null
         !Boolean.TRUE.equals(postsResult.isError())
     }
+
+    def "23. Test deleteArticle requires explicit confirm=true"() {
+        when: "client calls deleteArticle without confirm=true"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("deleteArticle", [
+                articleId: 12345L,
+                confirm: false
+        ]))
+
+        then: "it fails requiring explicit confirmation"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e != null
+    }
+
+    def "24. Test listTranslations validates resourceType against allowlist"() {
+        when: "client provides an invalid resource type"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listTranslations", [
+                resourceType: "unsupported_resource",
+                resourceId: 123L
+        ]))
+
+        then: "it rejects the request with an allowlist validation error"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e != null
+    }
+
+    def "25. Test updateArticle rejects empty update payloads"() {
+        when: "client calls updateArticle without specifying any fields to update"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("updateArticle", [
+                articleId: 12345L
+        ]))
+
+        then: "it fails requiring at least one field to update"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e != null
+    }
+
+    def "26. Test listArticles returns clear error for invalid locale"() {
+        when: "client provides an unsupported locale string"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listArticles", [
+                locale: "invalid-locale"
+        ]))
+
+        then: "it fails with a descriptive locale validation error"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e != null
+    }
+
+    def "27. Test createArticle requires essential parameters"() {
+        when: "client calls createArticle missing required title"
+        def result = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("createArticle", [
+                sectionId: 100L,
+                body: "Body without title",
+                permissionGroupId: 200L
+        ]))
+
+        then: "it fails schema validation or argument check"
+        result != null
+        Boolean.TRUE.equals(result.isError())
+    }
+
+    def "28. Test searchCommunityPosts requires non-blank query"() {
+        when: "client searches community posts with empty query"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("searchCommunityPosts", [
+                query: "   "
+        ]))
+
+        then: "it fails validation"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e != null
+    }
 }
