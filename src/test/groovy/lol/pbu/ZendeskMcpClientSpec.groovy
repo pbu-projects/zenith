@@ -126,7 +126,28 @@ class ZendeskMcpClientSpec extends Specification {
                 "uploadAttachment",
                 "batchUpdateTickets",
                 "getJobStatus",
-                "getTicketAudits"
+                "getTicketAudits",
+                "listViews",
+                "getViewTickets",
+                "listActiveViews",
+                "getView",
+                "executeView",
+                "getViewTicketCount",
+                "getArticle",
+                "listArticles",
+                "createArticle",
+                "updateArticle",
+                "deleteArticle",
+                "listTranslations",
+                "getTranslation",
+                "listCategories",
+                "getCategory",
+                "listCommunityTopics",
+                "getCommunityTopic",
+                "listCommunityPosts",
+                "getCommunityPost",
+                "searchCommunityPosts",
+                "listCommunityPostComments"
         ])
     }
 
@@ -348,5 +369,75 @@ class ZendeskMcpClientSpec extends Specification {
         then: "it succeeds"
         ticketsResult != null
         !Boolean.TRUE.equals(ticketsResult.isError())
+    }
+
+    def "19. Test listActiveViews, getView, executeView, and getViewTicketCount"() {
+        when: "client requests active views"
+        def viewsResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listActiveViews", [:]))
+
+        then: "it succeeds"
+        viewsResult != null
+        !Boolean.TRUE.equals(viewsResult.isError())
+        viewsResult.content() != null
+        !viewsResult.content().isEmpty()
+
+        when: "client gets view details, executes the view, and counts tickets"
+        def text = ((io.modelcontextprotocol.spec.McpSchema.TextContent) viewsResult.content().get(0)).text()
+        def viewsJson = new groovy.json.JsonSlurper().parseText(text)
+        def viewId = viewsJson.views[0].id
+
+        def showResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("getView", [viewId: viewId]))
+        def executeResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("executeView", [viewId: viewId]))
+        def countResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("getViewTicketCount", [viewId: viewId]))
+
+        then: "all view tools return valid results"
+        showResult != null
+        !Boolean.TRUE.equals(showResult.isError())
+        executeResult != null
+        !Boolean.TRUE.equals(executeResult.isError())
+        countResult != null
+        !Boolean.TRUE.equals(countResult.isError())
+    }
+
+    def "20. Test listArticles and getArticle"() {
+        when: "client lists help center articles"
+        def articlesResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listArticles", [:]))
+
+        then: "it succeeds"
+        articlesResult != null
+        !Boolean.TRUE.equals(articlesResult.isError())
+        articlesResult.content() != null
+
+        when: "client inspects articles response"
+        def text = ((io.modelcontextprotocol.spec.McpSchema.TextContent) articlesResult.content().get(0)).text()
+        def articlesJson = new groovy.json.JsonSlurper().parseText(text)
+
+        then: "articles list is returned"
+        articlesJson.articles != null
+    }
+
+    def "21. Test listCategories"() {
+        when: "client lists help center categories"
+        def categoriesResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listCategories", [:]))
+
+        then: "it succeeds"
+        categoriesResult != null
+        !Boolean.TRUE.equals(categoriesResult.isError())
+    }
+
+    def "22. Test community tools"() {
+        when: "client lists community topics"
+        def topicsResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listCommunityTopics", [:]))
+
+        then: "it succeeds"
+        topicsResult != null
+        !Boolean.TRUE.equals(topicsResult.isError())
+
+        when: "client lists community posts"
+        def postsResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listCommunityPosts", [:]))
+
+        then: "it succeeds"
+        postsResult != null
+        !Boolean.TRUE.equals(postsResult.isError())
     }
 }
