@@ -515,4 +515,37 @@ class ZendeskMcpClientSpec extends Specification {
         e.jsonRpcError.code == -32602
         e.message.contains("query cannot be null or blank")
     }
+
+    def "29. Test listTicketForms returns summary of active forms by default"() {
+        when: "client calls listTicketForms with default parameters"
+        def result = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listTicketForms", [:]))
+
+        then: "it returns successful result with ticket_forms array"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+
+        when: "client calls listTicketForms requesting full payload"
+        def fullResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listTicketForms", [
+                includeInactive: true,
+                fullPayload: true
+        ]))
+
+        then: "it returns full form schemas successfully"
+        fullResult != null
+        !Boolean.TRUE.equals(fullResult.isError())
+    }
+
+    def "30. Test Zendesk API errors propagate diagnostic messages (Issue #22)"() {
+        when: "client searches with invalid Zendesk search query syntax"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("search", [
+                query: "type:problem"
+        ]))
+
+        then: "it fails with an informative error from Zendesk API rather than 'message must not be empty'"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e.message.contains("Zendesk API error")
+        !e.message.contains("message must not be empty")
+    }
 }

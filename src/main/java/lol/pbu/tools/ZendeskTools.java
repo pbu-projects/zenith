@@ -39,6 +39,7 @@ import java.util.Arrays;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import lol.pbu.z4j.model.TicketCustomField;
 import java.util.Objects;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -560,10 +561,54 @@ public class ZendeskTools {
         return ticketClient.showTicketField(ticketFieldId).block();
     }
 
-    @Tool(description = "List all ticket forms configured in Zendesk")
-    public TicketFormsResponse listTicketForms() {
-        log.info("MCP Tool called: listTicketForms()");
-        return ticketFormsClient.listTicketForms().block();
+    public Map<String, Object> listTicketForms() {
+        return listTicketForms(null, null);
+    }
+
+    @Tool(description = "List Zendesk ticket forms. By default returns a compact summary of active forms only to save tokens. Use getTicketForm for full form details.")
+    public Map<String, Object> listTicketForms(
+            @ToolArg(description = "Whether to include inactive forms. Defaults to false (active forms only)") @Nullable Boolean includeInactive,
+            @ToolArg(description = "Whether to return full form schemas (including conditions and field IDs) or just summary. Defaults to false (summary mode)") @Nullable Boolean fullPayload
+    ) {
+        log.info("MCP Tool called: listTicketForms(includeInactive={}, fullPayload={})", includeInactive, fullPayload);
+        TicketFormsResponse response = ticketFormsClient.listTicketForms().block();
+        if (response == null || response.getTicketForms() == null) {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("ticket_forms", Collections.emptyList());
+            empty.put("ticketForms", Collections.emptyList());
+            return empty;
+        }
+
+        boolean activeOnly = !Boolean.TRUE.equals(includeInactive);
+        boolean isFull = Boolean.TRUE.equals(fullPayload);
+
+        List<TicketForm> forms = response.getTicketForms();
+        if (activeOnly) {
+            forms = forms.stream()
+                    .filter(f -> Boolean.TRUE.equals(f.getActive()))
+                    .collect(Collectors.toList());
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (isFull) {
+            result.put("ticket_forms", forms);
+            result.put("ticketForms", forms);
+            return result;
+        }
+
+        List<Map<String, Object>> summaries = forms.stream().map(f -> {
+            Map<String, Object> s = new LinkedHashMap<>();
+            s.put("id", f.getId());
+            s.put("name", f.getName());
+            s.put("display_name", f.getDisplayName());
+            s.put("active", f.getActive());
+            s.put("default", f.getDefaultForm());
+            return s;
+        }).collect(Collectors.toList());
+
+        result.put("ticket_forms", summaries);
+        result.put("ticketForms", summaries);
+        return result;
     }
 
     @Tool(description = "Get details of a specific Zendesk ticket form by its numeric ID")
