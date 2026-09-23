@@ -60,6 +60,27 @@ Add to your MCP client config:
 * `listCustomObjectRecords`: List records for a custom object.
 * `getCustomObjectRecord`: Fetch a specific custom object record by ID.
 * `searchCustomObjectRecords`: Search custom object records matching query text.
+* `listViews`: List all views configured in Zendesk.
+* `getViewTickets`: Get tickets from a specific Zendesk view by its numeric ID.
+* `listActiveViews`: List only active views configured in Zendesk.
+* `getView`: Fetch view metadata and details by ID.
+* `executeView`: Execute a specific view to inspect ticket rows and columns.
+* `getViewTicketCount`: Get the ticket count for a specific view.
+* `getArticle`: Fetch details and content of a Help Center / Knowledge Base article by ID and optional locale.
+* `listArticles`: List Help Center / Knowledge Base articles with optional locale, sort, labels, and incremental timestamp.
+* `createArticle`: Create a new article in a Help Center section.
+* `updateArticle`: Update an existing Help Center article.
+* `deleteArticle`: Delete a Help Center article by its ID.
+* `listTranslations`: List translations for a Help Center resource (articles, sections, categories).
+* `getTranslation`: Get a specific translation for a Help Center resource by locale.
+* `listCategories`: List Help Center categories.
+* `getCategory`: Fetch Help Center category details by numeric ID.
+* `listCommunityTopics`: List all community topics.
+* `getCommunityTopic`: Fetch details of a community topic by numeric ID.
+* `listCommunityPosts`: List community posts (optionally filtered by topic ID).
+* `getCommunityPost`: Fetch details of a community post by numeric ID.
+* `searchCommunityPosts`: Search community posts matching query text.
+* `listCommunityPostComments`: List comments for a community post.
 * `getToolVersion`: Get the version of the MCP server.
 
 ## Resources

@@ -7,15 +7,19 @@ import io.micronaut.mcp.annotations.ToolArg;
 import jakarta.inject.Singleton;
 import lol.pbu.model.BatchUpdateResponse;
 import lol.pbu.model.BatchUpdateResponse.TicketUpdateResult;
+import lol.pbu.z4j.client.ArticleClient;
 import lol.pbu.z4j.client.AttachmentClient;
+import lol.pbu.z4j.client.CategoryClient;
 import lol.pbu.z4j.client.CustomObjectRecordsClient;
 import lol.pbu.z4j.client.CustomObjectsClient;
 import lol.pbu.z4j.client.JobStatusClient;
-import lol.pbu.z4j.client.ViewClient;
-import lol.pbu.z4j.model.ViewsResponse;
+import lol.pbu.z4j.client.PostClient;
 import lol.pbu.z4j.client.SearchClient;
 import lol.pbu.z4j.client.TicketClient;
 import lol.pbu.z4j.client.TicketFormsClient;
+import lol.pbu.z4j.client.TopicClient;
+import lol.pbu.z4j.client.TranslationClient;
+import lol.pbu.z4j.client.ViewClient;
 import lol.pbu.z4j.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +42,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * MCP Tools exposing Zendesk ticket management, forms, custom objects, attachments, and search operations via z4j.
+ * MCP Tools exposing Zendesk ticket management, forms, custom objects, attachments, search, views, articles, categories, translations, and community operations via z4j.
  */
 @Singleton
 public class ZendeskTools {
@@ -53,6 +57,11 @@ public class ZendeskTools {
     private final AttachmentClient attachmentClient;
     private final JobStatusClient jobStatusClient;
     private final ViewClient viewClient;
+    private final ArticleClient articleClient;
+    private final CategoryClient categoryClient;
+    private final TranslationClient translationClient;
+    private final TopicClient topicClient;
+    private final PostClient postClient;
 
     public ZendeskTools(
             TicketClient ticketClient,
@@ -62,7 +71,12 @@ public class ZendeskTools {
             CustomObjectRecordsClient customObjectRecordsClient,
             AttachmentClient attachmentClient,
             JobStatusClient jobStatusClient,
-            ViewClient viewClient
+            ViewClient viewClient,
+            ArticleClient articleClient,
+            CategoryClient categoryClient,
+            TranslationClient translationClient,
+            TopicClient topicClient,
+            PostClient postClient
     ) {
         this.ticketClient = ticketClient;
         this.searchClient = searchClient;
@@ -72,6 +86,11 @@ public class ZendeskTools {
         this.attachmentClient = attachmentClient;
         this.jobStatusClient = jobStatusClient;
         this.viewClient = viewClient;
+        this.articleClient = articleClient;
+        this.categoryClient = categoryClient;
+        this.translationClient = translationClient;
+        this.topicClient = topicClient;
+        this.postClient = postClient;
     }
 
     @Tool(description = "Get details of a specific Zendesk ticket by its numeric ID")
@@ -615,6 +634,245 @@ public class ZendeskTools {
     ) {
         log.info("MCP Tool called: getViewTickets(viewId={})", viewId);
         return viewClient.listTicketsForView(viewId).block();
+    }
+
+    @Tool(description = "List only active views configured in Zendesk")
+    public ViewsResponse listActiveViews() {
+        log.info("MCP Tool called: listActiveViews()");
+        return viewClient.listActiveViews().block();
+    }
+
+    @Tool(description = "Get details of a specific Zendesk view by its numeric ID")
+    public ViewResponse getView(
+            @ToolArg(description = "The numeric view ID") Long viewId
+    ) {
+        log.info("MCP Tool called: getView(viewId={})", viewId);
+        return viewClient.showView(viewId).block();
+    }
+
+    @Tool(description = "Execute a specific Zendesk view by its numeric ID to retrieve ticket rows and columns")
+    public ViewExecuteResponse executeView(
+            @ToolArg(description = "The numeric view ID") Long viewId
+    ) {
+        log.info("MCP Tool called: executeView(viewId={})", viewId);
+        return viewClient.executeView(viewId).block();
+    }
+
+    @Tool(description = "Get the ticket count for a specific Zendesk view by its numeric ID")
+    public ViewCountResponse getViewTicketCount(
+            @ToolArg(description = "The numeric view ID") Long viewId
+    ) {
+        log.info("MCP Tool called: getViewTicketCount(viewId={})", viewId);
+        return viewClient.countView(viewId).block();
+    }
+
+    @Tool(description = "Get details and content of a specific Zendesk Help Center / Knowledge Base article by its numeric ID")
+    public ArticleResponse getArticle(
+            @ToolArg(description = "The numeric article ID") Long articleId,
+            @ToolArg(description = "Optional locale code, e.g. 'en-us'. Defaults to 'en-us'") @Nullable String locale
+    ) {
+        log.info("MCP Tool called: getArticle(id={}, locale='{}')", articleId, locale);
+        LocaleAbbreviation localeAbbr = resolveLocale(locale);
+        return articleClient.showArticle(localeAbbr, articleId).block();
+    }
+
+    @Tool(description = "List Zendesk Help Center / Knowledge Base articles")
+    public ArticlesResponse listArticles(
+            @ToolArg(description = "Optional locale code, e.g. 'en-us'. Defaults to 'en-us'") @Nullable String locale,
+            @ToolArg(description = "Optional sort field: position, title, created_at, updated_at, edited_at") @Nullable String sortBy,
+            @ToolArg(description = "Optional sort order: asc or desc") @Nullable String sortOrder,
+            @ToolArg(description = "Optional start time Unix epoch timestamp for incremental listing") @Nullable Long startTime,
+            @ToolArg(description = "Optional comma-delimited label names") @Nullable String labelNames
+    ) {
+        log.info("MCP Tool called: listArticles(locale='{}', sortBy='{}')", locale, sortBy);
+        LocaleAbbreviation localeAbbr = resolveLocale(locale);
+        return articleClient.listArticles(
+                localeAbbr,
+                resolveSortArticleBy(sortBy),
+                resolveSortOrder(sortOrder),
+                startTime,
+                labelNames
+        ).block();
+    }
+
+    @Tool(description = "Create a new article in a Zendesk Help Center section")
+    public ArticleResponse createArticle(
+            @ToolArg(description = "The ID of the section to which the article belongs") Long sectionId,
+            @ToolArg(description = "The title of the article") String title,
+            @ToolArg(description = "The HTML body content of the article") String body,
+            @ToolArg(description = "The ID of the permission group defining who can edit/publish this article") Long permissionGroupId,
+            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale,
+            @ToolArg(description = "Optional flag indicating whether this article is a draft. Defaults to false") @Nullable Boolean draft,
+            @ToolArg(description = "Optional list of label names for the article") @Nullable List<String> labelNames,
+            @ToolArg(description = "Optional user segment ID defining who can view this article") @Nullable Long userSegmentId
+    ) {
+        log.info("MCP Tool called: createArticle(sectionId={}, title='{}')", sectionId, title);
+        LocaleAbbreviation localeAbbr = resolveLocale(locale);
+        Article article = new Article()
+                .setTitle(title)
+                .setBody(body)
+                .setPermissionGroupId(permissionGroupId)
+                .setLocaleAbbreviation(localeAbbr);
+        if (draft != null) {
+            article.setDraft(draft);
+        }
+        if (labelNames != null && !labelNames.isEmpty()) {
+            article.setLabelNames(labelNames);
+        }
+        if (userSegmentId != null) {
+            article.setUserSegmentId(userSegmentId);
+        }
+        return articleClient.createArticle(localeAbbr, sectionId, new ArticleCreateRequest(article)).block();
+    }
+
+    @Tool(description = "Update an existing Zendesk Help Center article")
+    public ArticleResponse updateArticle(
+            @ToolArg(description = "The unique numeric ID of the article") Long articleId,
+            @ToolArg(description = "Optional new title of the article") @Nullable String title,
+            @ToolArg(description = "Optional new HTML body content of the article") @Nullable String body,
+            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale,
+            @ToolArg(description = "Optional list of label names for the article") @Nullable List<String> labelNames,
+            @ToolArg(description = "Optional user segment ID defining who can view this article") @Nullable Long userSegmentId
+    ) {
+        log.info("MCP Tool called: updateArticle(articleId={})", articleId);
+        LocaleAbbreviation localeAbbr = resolveLocale(locale);
+        Article article = new Article();
+        if (title != null) {
+            article.setTitle(title);
+        }
+        if (body != null) {
+            article.setBody(body);
+        }
+        if (labelNames != null) {
+            article.setLabelNames(labelNames);
+        }
+        if (userSegmentId != null) {
+            article.setUserSegmentId(userSegmentId);
+        }
+        return articleClient.updateArticle(localeAbbr, articleId, new ArticleUpdateRequest(article)).block();
+    }
+
+    @Tool(description = "Delete a Zendesk Help Center article by its ID")
+    public Map<String, Object> deleteArticle(
+            @ToolArg(description = "The unique numeric ID of the article to delete") Long articleId,
+            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
+    ) {
+        log.info("MCP Tool called: deleteArticle(articleId={})", articleId);
+        LocaleAbbreviation localeAbbr = resolveLocale(locale);
+        articleClient.deleteArticle(localeAbbr, articleId).block();
+        return Map.of("success", true, "deletedArticleId", articleId);
+    }
+
+    @Tool(description = "List translations for a Zendesk Help Center resource (e.g. 'articles', 'sections', 'categories')")
+    public TranslationsResponse listTranslations(
+            @ToolArg(description = "The resource type: 'articles', 'sections', or 'categories'") String resourceType,
+            @ToolArg(description = "The numeric ID of the parent resource") Long resourceId
+    ) {
+        log.info("MCP Tool called: listTranslations(resourceType='{}', resourceId={})", resourceType, resourceId);
+        return translationClient.listTranslations(resourceType, resourceId).block();
+    }
+
+    @Tool(description = "Get a specific translation for a Zendesk Help Center resource by locale")
+    public TranslationResponse getTranslation(
+            @ToolArg(description = "The resource type: 'articles', 'sections', or 'categories'") String resourceType,
+            @ToolArg(description = "The numeric ID of the parent resource") Long resourceId,
+            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
+    ) {
+        log.info("MCP Tool called: getTranslation(resourceType='{}', resourceId={}, locale='{}')", resourceType, resourceId, locale);
+        return translationClient.showTranslation(resourceType, resourceId, resolveLocale(locale)).block();
+    }
+
+    @Tool(description = "List Zendesk Help Center categories")
+    public CategoriesResponse listCategories(
+            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). If omitted, lists categories across all locales") @Nullable String locale
+    ) {
+        log.info("MCP Tool called: listCategories(locale='{}')", locale);
+        if (locale != null && !locale.isBlank()) {
+            return categoryClient.listCategories(resolveLocale(locale), null, null).block();
+        }
+        return categoryClient.listCategoriesNoLocale(null, null).block();
+    }
+
+    @Tool(description = "Get details of a specific Zendesk Help Center category by its numeric ID")
+    public CategoryResponse getCategory(
+            @ToolArg(description = "The numeric category ID") Long categoryId,
+            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us')") @Nullable String locale
+    ) {
+        log.info("MCP Tool called: getCategory(categoryId={}, locale='{}')", categoryId, locale);
+        if (locale != null && !locale.isBlank()) {
+            return categoryClient.showCategory(resolveLocale(locale), categoryId).block();
+        }
+        return categoryClient.showCategoryNoLocale(categoryId).block();
+    }
+
+    @Tool(description = "List all Zendesk Community topics")
+    public TopicsResponse listCommunityTopics() {
+        log.info("MCP Tool called: listCommunityTopics()");
+        return topicClient.listTopics().block();
+    }
+
+    @Tool(description = "Get details of a specific Zendesk Community topic by its numeric ID")
+    public TopicResponse getCommunityTopic(
+            @ToolArg(description = "The numeric topic ID") Long topicId
+    ) {
+        log.info("MCP Tool called: getCommunityTopic(topicId={})", topicId);
+        return topicClient.showTopic(topicId).block();
+    }
+
+    @Tool(description = "List Zendesk Community posts, optionally filtered by topic ID")
+    public PostsResponse listCommunityPosts(
+            @ToolArg(description = "Optional topic ID to filter posts by") @Nullable Long topicId
+    ) {
+        log.info("MCP Tool called: listCommunityPosts(topicId={})", topicId);
+        if (topicId != null) {
+            return postClient.listPostsByTopic(topicId).block();
+        }
+        return postClient.listPosts().block();
+    }
+
+    @Tool(description = "Get details of a specific Zendesk Community post by its numeric ID")
+    public PostResponse getCommunityPost(
+            @ToolArg(description = "The numeric post ID") Long postId
+    ) {
+        log.info("MCP Tool called: getCommunityPost(postId={})", postId);
+        return postClient.showPost(postId).block();
+    }
+
+    @Tool(description = "Search Zendesk Community posts matching a query string")
+    public CommunityPostSearchResponse searchCommunityPosts(
+            @ToolArg(description = "The search query string") String query
+    ) {
+        log.info("MCP Tool called: searchCommunityPosts(query='{}')", query);
+        return postClient.searchPosts(query).block();
+    }
+
+    @Tool(description = "List comments for a specific Zendesk Community post by its numeric ID")
+    public PostCommentsResponse listCommunityPostComments(
+            @ToolArg(description = "The numeric post ID") Long postId
+    ) {
+        log.info("MCP Tool called: listCommunityPostComments(postId={})", postId);
+        return postClient.listPostComments(postId).block();
+    }
+
+    private LocaleAbbreviation resolveLocale(@Nullable String locale) {
+        if (locale == null || locale.isBlank()) {
+            return LocaleAbbreviation.ENGLISH_UNITED_STATES;
+        }
+        return LocaleAbbreviation.fromValue(locale.trim());
+    }
+
+    private SortArticleBy resolveSortArticleBy(@Nullable String sortBy) {
+        if (sortBy == null || sortBy.isBlank()) {
+            return null;
+        }
+        return SortArticleBy.fromValue(sortBy.trim().toLowerCase());
+    }
+
+    private SortOrder resolveSortOrder(@Nullable String sortOrder) {
+        if (sortOrder == null || sortOrder.isBlank()) {
+            return null;
+        }
+        return SortOrder.fromValue(sortOrder.trim().toLowerCase());
     }
 
 }
