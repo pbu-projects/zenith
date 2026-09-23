@@ -759,6 +759,8 @@ public class ZendeskTools {
             @ToolArg(description = "Optional new title of the article") @Nullable String title,
             @ToolArg(description = "Optional new HTML body content of the article") @Nullable String body,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale,
+            @ToolArg(description = "Optional flag to publish (false) or draft (true) the article") @Nullable Boolean draft,
+            @ToolArg(description = "Optional permission group ID defining who can edit/publish this article") @Nullable Long permissionGroupId,
             @ToolArg(description = "Optional list of label names for the article") @Nullable List<String> labelNames,
             @ToolArg(description = "Optional user segment ID defining who can view this article") @Nullable Long userSegmentId
     ) {
@@ -766,8 +768,8 @@ public class ZendeskTools {
         if (articleId == null) {
             throw new IllegalArgumentException("articleId is required");
         }
-        if (title == null && body == null && labelNames == null && userSegmentId == null) {
-            throw new IllegalArgumentException("At least one field to update (title, body, labelNames, userSegmentId) must be provided.");
+        if (title == null && body == null && labelNames == null && userSegmentId == null && draft == null && permissionGroupId == null) {
+            throw new IllegalArgumentException("At least one field to update (title, body, labelNames, userSegmentId, draft, permissionGroupId) must be provided.");
         }
         LocaleAbbreviation localeAbbr = resolveLocale(locale);
         Article article = new Article();
@@ -776,6 +778,12 @@ public class ZendeskTools {
         }
         if (body != null) {
             article.setBody(body);
+        }
+        if (draft != null) {
+            article.setDraft(draft);
+        }
+        if (permissionGroupId != null) {
+            article.setPermissionGroupId(permissionGroupId);
         }
         if (labelNames != null) {
             article.setLabelNames(labelNames);
@@ -786,10 +794,10 @@ public class ZendeskTools {
         return articleClient.updateArticle(localeAbbr, articleId, new ArticleUpdateRequest(article)).block();
     }
 
-    @Tool(description = "Delete a Zendesk Help Center article by its ID. Requires confirm=true to prevent accidental deletion")
+    @Tool(description = "Delete a Zendesk Help Center article translation for a given locale (or the article if it is the only translation). Requires confirm=true to prevent accidental deletion")
     public Map<String, Object> deleteArticle(
             @ToolArg(description = "The unique numeric ID of the article to delete") Long articleId,
-            @ToolArg(description = "Must be explicitly set to true to confirm deletion of this article") Boolean confirm,
+            @ToolArg(description = "Must be explicitly set to true to confirm deletion of this article") @Nullable Boolean confirm,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
     ) {
         log.info("MCP Tool called: deleteArticle(articleId={}, confirm={})", articleId, confirm);
@@ -919,10 +927,21 @@ public class ZendeskTools {
     }
 
     private String validateResourceType(String resourceType) {
-        if (resourceType == null || !ALLOWED_RESOURCE_TYPES.contains(resourceType.trim().toLowerCase())) {
+        if (resourceType == null || resourceType.isBlank()) {
+            throw new IllegalArgumentException("resourceType is required. Allowed values are: " + ALLOWED_RESOURCE_TYPES);
+        }
+        String normalized = resourceType.trim().toLowerCase();
+        if ("article".equals(normalized)) {
+            normalized = "articles";
+        } else if ("section".equals(normalized)) {
+            normalized = "sections";
+        } else if ("category".equals(normalized)) {
+            normalized = "categories";
+        }
+        if (!ALLOWED_RESOURCE_TYPES.contains(normalized)) {
             throw new IllegalArgumentException("Invalid resourceType: '" + resourceType + "'. Allowed values are: " + ALLOWED_RESOURCE_TYPES);
         }
-        return resourceType.trim().toLowerCase();
+        return normalized;
     }
 
     private LocaleAbbreviation resolveLocale(@Nullable String locale) {
@@ -930,6 +949,9 @@ public class ZendeskTools {
             return LocaleAbbreviation.ENGLISH_UNITED_STATES;
         }
         String cleanLocale = locale.trim().toLowerCase();
+        if ("no".equals(cleanLocale)) {
+            return LocaleAbbreviation.NORWEGIAN;
+        }
         try {
             return LocaleAbbreviation.fromValue(cleanLocale);
         } catch (IllegalArgumentException e) {
@@ -954,6 +976,11 @@ public class ZendeskTools {
             return null;
         }
         String cleanOrder = sortOrder.trim().toLowerCase();
+        if ("ascending".equals(cleanOrder)) {
+            cleanOrder = "asc";
+        } else if ("descending".equals(cleanOrder)) {
+            cleanOrder = "desc";
+        }
         try {
             return SortOrder.fromValue(cleanOrder);
         } catch (IllegalArgumentException e) {

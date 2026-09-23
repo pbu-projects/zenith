@@ -450,7 +450,8 @@ class ZendeskMcpClientSpec extends Specification {
 
         then: "it fails requiring explicit confirmation"
         def e = thrown(io.modelcontextprotocol.spec.McpError)
-        e != null
+        e.jsonRpcError.code == -32602
+        e.message.contains("Deletion requires explicit confirmation")
     }
 
     def "24. Test listTranslations validates resourceType against allowlist"() {
@@ -462,7 +463,8 @@ class ZendeskMcpClientSpec extends Specification {
 
         then: "it rejects the request with an allowlist validation error"
         def e = thrown(io.modelcontextprotocol.spec.McpError)
-        e != null
+        e.jsonRpcError.code == -32602
+        e.message.contains("Invalid resourceType")
     }
 
     def "25. Test updateArticle rejects empty update payloads"() {
@@ -473,7 +475,8 @@ class ZendeskMcpClientSpec extends Specification {
 
         then: "it fails requiring at least one field to update"
         def e = thrown(io.modelcontextprotocol.spec.McpError)
-        e != null
+        e.jsonRpcError.code == -32602
+        e.message.contains("At least one field to update")
     }
 
     def "26. Test listArticles returns clear error for invalid locale"() {
@@ -484,7 +487,8 @@ class ZendeskMcpClientSpec extends Specification {
 
         then: "it fails with a descriptive locale validation error"
         def e = thrown(io.modelcontextprotocol.spec.McpError)
-        e != null
+        e.jsonRpcError.code == -32602
+        e.message.contains("Invalid locale")
     }
 
     def "27. Test createArticle requires essential parameters"() {
@@ -508,6 +512,7 @@ class ZendeskMcpClientSpec extends Specification {
 
         then: "it fails validation"
         def e = thrown(io.modelcontextprotocol.spec.McpError)
-        e != null
+        e.jsonRpcError.code == -32602
+        e.message.contains("query cannot be null or blank")
     }
 }
