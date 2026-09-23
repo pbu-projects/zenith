@@ -179,8 +179,6 @@ public class ZendeskTools {
             int size = Math.min(limit - accumulatedResponse.getResults().size(), 100);
 
             SearchResponse pageResponse = searchClient.list(query, resolvedInclude, null, null, p, 100)
-                    .retryWhen(reactor.util.retry.Retry.backoff(5, java.time.Duration.ofSeconds(2))
-                            .filter(throwable -> throwable.getMessage() != null && throwable.getMessage().contains("429")))
                     .block();
 
             if (pageResponse == null || pageResponse.getResults() == null || pageResponse.getResults().isEmpty()) {
