@@ -95,10 +95,6 @@ Add to your MCP client config:
 * `searchCommunityPosts`: Search community posts matching query text.
 * `listCommunityPostComments`: List comments for a community post.
 
-## Resources
-
-* `serverVersion` (`zenith://version`): Get the version of the MCP server.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
