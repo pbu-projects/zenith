@@ -100,4 +100,21 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
         mcpError.message.contains("[Non-JSON HTML error page received from gateway]")
         !mcpError.message.contains("<html>")
     }
+
+    def "truncates excessively large JSON error diagnostics to protect context window"() {
+        given:
+        def hugeDetails = "A" * 1000
+        def jsonBody = '{"error":"RecordInvalid","description":"Validation failed","details":"' + hugeDetails + '"}'
+        def response = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(jsonBody)
+        def ex = new HttpClientResponseException("Unprocessable Entity", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("... [truncated]")
+        mcpError.message.length() < 600
+    }
 }

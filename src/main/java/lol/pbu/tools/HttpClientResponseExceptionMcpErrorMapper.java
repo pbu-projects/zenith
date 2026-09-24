@@ -142,17 +142,18 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         }
 
         String jsonDiagnostic = parseJsonDiagnostic(body);
-        if (jsonDiagnostic != null) {
-            return jsonDiagnostic;
+        String diagnostic = jsonDiagnostic;
+        if (diagnostic == null) {
+            if (body.startsWith("<") || body.contains("<html") || body.contains("<HTML")) {
+                return "[Non-JSON HTML error page received from gateway]";
+            }
+            diagnostic = body;
         }
 
-        if (body.startsWith("<") || body.contains("<html") || body.contains("<HTML")) {
-            return "[Non-JSON HTML error page received from gateway]";
+        if (diagnostic.length() > 500) {
+            return diagnostic.substring(0, 500) + "... [truncated]";
         }
-        if (body.length() > 500) {
-            return body.substring(0, 500) + "... [truncated]";
-        }
-        return body;
+        return diagnostic;
     }
 
     @SuppressWarnings("unchecked")
