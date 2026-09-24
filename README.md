@@ -1,6 +1,12 @@
-# Zenith
+<h1>Zenith 
+<img src="src/main/docs/zenith.svg" style="height: 2em; vertical-align: middle; margin-left: 0.25em;"" alt="zenith logo"> 
 
-Zendesk STDIO MCP server.
+</h1>
+
+<p>STDIO MCP server for Zendesk.<img src="https://sonarcloud.io/api/project_badges/measure?project=pbu-projects_zenith&metric=alert_status" href="https://sonarcloud.io/summary/new_code?id=pbu-projects_zenith" style="height: 1.25em; vertical-align: middle; margin-left: 1em;"
+
+</p>
+
 
 ## Installation
 
@@ -30,7 +36,6 @@ Add to your MCP client config:
         "ZENDESK_URL": "https://<subdomain>.zendesk.com",
         "ZENDESK_CLIENT_ID": "<client_id>",
         "ZENDESK_CLIENT_SECRET": "<client_secret>",
-        "ZENDESK_OAUTH_SCOPE": "read write"
       }
     }
   }
