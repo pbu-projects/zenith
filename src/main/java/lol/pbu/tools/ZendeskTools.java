@@ -445,6 +445,37 @@ public class ZendeskTools {
         return input;
     }
 
+    private TicketUpdateInput buildTicketUpdateInput(
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> tokens,
+            List<TicketCustomField> customFields,
+            Long requesterId,
+            String type,
+            Boolean convertToIncident
+    ) {
+        TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, customFields);
+        if (requesterId != null) {
+            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
+                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
+            }
+            input.setRequesterId(requesterId.intValue());
+        }
+
+        if (type != null) {
+            if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
+                input.setType(null);
+            } else {
+                input.setType(parseTicketType(type));
+            }
+        } else if (Boolean.TRUE.equals(convertToIncident)) {
+            input.setType(TicketUpdateInputType.INCIDENT);
+        }
+        return input;
+    }
+
     private void validateProblemTarget(Long problemId) {
         if (problemId == null) return;
         try {
@@ -472,9 +503,8 @@ public class ZendeskTools {
             if (!Boolean.TRUE.equals(convertToIncident)) {
                 throw new IllegalArgumentException("Ticket #" + currentTicket.getId() + " is not an incident. Pass convertToIncident=true to explicitly convert it.");
             }
-            input.setType(TicketUpdateInputType.INCIDENT);
         }
-        
+        input.setType(TicketUpdateInputType.INCIDENT);
         input.setProblemId(problemId.intValue());
     }
 
@@ -498,28 +528,12 @@ public class ZendeskTools {
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
         validateKnownParameters(request, "updateTicket", "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields", "requesterId", "type");
         List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-        TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
-        if (requesterId != null) {
-            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
-                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
-            }
-            input.setRequesterId(requesterId.intValue());
-        }
+        TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
+
+        validateProblemTarget(problemId);
 
         final boolean isTypeUnset = type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
         final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
-        if (type != null) {
-            if (isTypeUnset) {
-                input.setType(null);
-            } else {
-                input.setType(parsedType);
-            }
-        }
-        if (Boolean.TRUE.equals(convertToIncident) && type == null) {
-            input.setType(TicketUpdateInputType.INCIDENT);
-        }
-
-        validateProblemTarget(problemId);
 
         if (problemId != null || type != null) {
             TicketResponse showResp = ticketClient.showTicket(ticketId).block();
@@ -655,25 +669,9 @@ public class ZendeskTools {
             }
         }
 
+        List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
         if (Boolean.TRUE.equals(asyncBulk)) {
-            List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-            TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
-            if (requesterId != null) {
-                if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
-                    throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
-                }
-                input.setRequesterId(requesterId.intValue());
-            }
-            if (type != null) {
-                if (isTypeUnset) {
-                    input.setType(null);
-                } else {
-                    input.setType(parsedType);
-                }
-            } else if (Boolean.TRUE.equals(convertToIncident)) {
-                input.setType(TicketUpdateInputType.INCIDENT);
-            }
-            
+            TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
             if (problemId != null) {
                 input.setProblemId(problemId.intValue());
                 input.setType(TicketUpdateInputType.INCIDENT);
@@ -694,23 +692,7 @@ public class ZendeskTools {
         // Concurrent immediate updates via Reactor Flux
         List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
-                    List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-                    TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
-                    if (requesterId != null) {
-                        if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
-                            throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
-                        }
-                        input.setRequesterId(requesterId.intValue());
-                    }
-                    if (type != null) {
-                        if (isTypeUnset) {
-                            input.setType(null);
-                        } else {
-                            input.setType(parsedType);
-                        }
-                    } else if (Boolean.TRUE.equals(convertToIncident)) {
-                        input.setType(TicketUpdateInputType.INCIDENT);
-                    }
+                    TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
                     
                     Mono<TicketUpdateInput> inputMono;
                     if (problemId != null) {
