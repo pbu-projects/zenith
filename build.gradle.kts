@@ -145,6 +145,7 @@ sonar {
 }
 
 tasks.withType<ProcessResources> {
+    inputs.file("gradle.properties")
     val props = Properties()
     file("gradle.properties").inputStream().use { props.load(it) }
     filesMatching("**/application.yml") {

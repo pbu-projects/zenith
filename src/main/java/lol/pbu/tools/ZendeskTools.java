@@ -246,20 +246,44 @@ public class ZendeskTools {
     @Tool(description = "Create a new Zendesk ticket")
     public TicketResponse createTicket(
             @ToolArg(description = "The subject of the ticket") String subject,
-            @ToolArg(description = "The initial comment / description of the ticket") String comment,
+            @ToolArg(description = "The initial comment / description of the ticket") @Nullable String comment,
             @ToolArg(description = "Required. Whether the initial comment is public (true) or private internal note (false)") Boolean isPublic,
             @ToolArg(description = "Priority: urgent, high, normal, low") @Nullable String priority,
             @ToolArg(description = "Status: new, open, pending, hold, solved, closed") @Nullable String status,
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
-            @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths
+            @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
+            @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
+            @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
+            @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
+            CallToolRequest request
     ) {
         log.info("MCP Tool called: createTicket(subject='{}')", subject);
+        validateKnownParameters(request, "createTicket", "subject", "comment", "isPublic", "priority", "status", "uploadTokens", "attachmentFilePaths", "customFields", "requesterId", "type", "description");
+
+        String initialComment = comment;
+        if (request != null && request.arguments() != null && request.arguments().containsKey("description")) {
+            Object descObj = request.arguments().get("description");
+            String desc = descObj != null ? descObj.toString() : null;
+            if (StringUtils.isNotEmpty(desc)) {
+                if (StringUtils.isNotEmpty(initialComment) && !initialComment.equals(desc)) {
+                    throw new IllegalArgumentException("Provide either 'comment' or 'description' for the initial ticket message, not both with different content.");
+                }
+                if (StringUtils.isEmpty(initialComment)) {
+                    initialComment = desc;
+                }
+            }
+        }
+
+        List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
+        if (StringUtils.isEmpty(initialComment) && tokens.isEmpty()) {
+            throw new IllegalArgumentException("Either 'comment' or 'description' is required when creating a ticket.");
+        }
+
         if (isPublic == null) {
             throw new IllegalArgumentException("isPublic is required when creating a ticket. Set to true for a public initial comment, or false for an internal note.");
         }
-        TicketComment ticketComment = new TicketComment().setBody(comment);
+        TicketComment ticketComment = new TicketComment().setBody(initialComment);
         ticketComment.setIsPublic(isPublic);
-        List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
         if (!tokens.isEmpty()) {
             ticketComment.setUploads(tokens);
         }
@@ -280,18 +304,86 @@ public class ZendeskTools {
                 log.warn("Unknown status '{}', ignoring", status);
             }
         }
+        List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
+        if (!parsedCustomFields.isEmpty()) {
+            input.setCustomFields(parsedCustomFields);
+        }
+        if (requesterId != null) {
+            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
+                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
+            }
+            input.setRequesterId(requesterId.intValue());
+        }
+        if (StringUtils.isNotEmpty(type)) {
+            if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
+                input.setType(null);
+            } else {
+                TicketUpdateInputType parsedType = parseTicketType(type);
+                input.setType(parsedType);
+            }
+        }
 
         return ticketClient.createTicket(new TicketCreateRequest(input)).block();
     }
 
+    public TicketResponse createTicket(
+            String subject,
+            String comment,
+            Boolean isPublic,
+            String priority,
+            String status,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths
+    ) {
+        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, null, null, null, null);
+    }
 
-    
-    private void validateKnownParameters(CallToolRequest request, String... knownParams) {
+    public TicketResponse createTicket(
+            String subject,
+            String comment,
+            Boolean isPublic,
+            String priority,
+            String status,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type
+    ) {
+        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, null);
+    }
+
+    private TicketUpdateInputType parseTicketType(String type) {
+        if (type != null) {
+            String normalized = type.trim().toLowerCase();
+            if ("problem".equals(normalized) || "incident".equals(normalized) || "question".equals(normalized) || "task".equals(normalized)) {
+                return TicketUpdateInputType.fromValue(normalized);
+            }
+        }
+        throw new IllegalArgumentException("Invalid ticket type: '" + type + "'. Allowed types are: problem, incident, question, task.");
+    }
+
+    private void validateKnownParameters(CallToolRequest request, String toolName, String... knownParams) {
         if (request == null || request.arguments() == null) return;
         Set<String> known = new HashSet<>(Arrays.asList(knownParams));
+        if (request.arguments().containsKey("description") && !known.contains("description")) {
+            throw new IllegalArgumentException("Ticket description cannot be modified after creation as it is read-only in Zendesk. To add information to an existing ticket, use the 'comment' parameter instead.");
+        }
         for (String key : request.arguments().keySet()) {
             if (!known.contains(key)) {
-                throw new IllegalArgumentException("Unrecognized parameter: '" + key + "'. If you meant to update a custom field, use the 'customFields' array parameter.");
+                String hint = "createTicket".equals(toolName)
+                        ? "If you meant to set a custom field, use the 'customFields' array parameter."
+                        : "If you meant to update a custom field, use the 'customFields' array parameter.";
+                throw new IllegalArgumentException("Unrecognized parameter: '" + key + "'. " + hint);
+            }
+        }
+    }
+
+    private void validateTicketTypeChange(Ticket currentTicket, TicketUpdateInputType newType, boolean isTypeUnset) {
+        if (currentTicket == null) return;
+        if (currentTicket.getType() == TicketType.PROBLEM && Boolean.TRUE.equals(currentTicket.getHasIncidents())) {
+            if (isTypeUnset || newType != TicketUpdateInputType.PROBLEM) {
+                throw new IllegalArgumentException("ticket #" + currentTicket.getId() + " is a parent problem with linked incidents — reassign or resolve those first");
             }
         }
     }
@@ -300,6 +392,7 @@ public class ZendeskTools {
         if (customFields == null || customFields.isEmpty()) return Collections.emptyList();
         List<TicketCustomField> result = new ArrayList<>();
         for (Map<String, Object> cf : customFields) {
+            if (cf == null) continue;
             Object idObj = cf.get("id");
             Object value = cf.get("value");
             if (idObj == null) throw new IllegalArgumentException("Custom field must have an 'id'");
@@ -307,7 +400,11 @@ public class ZendeskTools {
             if (idObj instanceof Number number) {
                 id = number.longValue();
             } else {
-                id = Long.parseLong(idObj.toString());
+                try {
+                    id = Long.parseLong(idObj.toString().trim());
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("Custom field 'id' must be a numeric ID, got: '" + idObj + "'", e);
+                }
             }
             result.add(new TicketCustomField.Raw(id, value));
         }
@@ -393,22 +490,83 @@ public class ZendeskTools {
             @ToolArg(description = "Optional ID of the parent problem ticket to link this incident to") @Nullable Long problemId,
             @ToolArg(description = "Required if setting problemId on a ticket that is not currently an incident. Set to true to explicitly convert it.") @Nullable Boolean convertToIncident,
             @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
+            @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
+            @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
             CallToolRequest request
     ) {
         log.info("MCP Tool called: updateTicket(id={})", ticketId);
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
-        validateKnownParameters(request, "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields");
+        validateKnownParameters(request, "updateTicket", "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields", "requesterId", "type");
         List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
         TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
+        if (requesterId != null) {
+            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
+                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
+            }
+            input.setRequesterId(requesterId.intValue());
+        }
+
+        final boolean isTypeUnset = type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
+        final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
+        if (type != null) {
+            if (isTypeUnset) {
+                input.setType(null);
+            } else {
+                input.setType(parsedType);
+            }
+        }
+        if (Boolean.TRUE.equals(convertToIncident) && type == null) {
+            input.setType(TicketUpdateInputType.INCIDENT);
+        }
 
         validateProblemTarget(problemId);
 
-        if (problemId != null) {
-            Ticket currentTicket = ticketClient.showTicket(ticketId).block().getTicket();
-            applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
+        if (problemId != null || type != null) {
+            TicketResponse showResp = ticketClient.showTicket(ticketId).block();
+            if (showResp == null || showResp.getTicket() == null) {
+                throw new IllegalArgumentException("Ticket #" + ticketId + " could not be retrieved. Does it exist?");
+            }
+            Ticket currentTicket = showResp.getTicket();
+            if (type != null) {
+                validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
+            }
+            if (problemId != null) {
+                applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
+            }
         }
 
         return ticketClient.updateTicket(ticketId, new TicketUpdateRequest(input)).block();
+    }
+
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            CallToolRequest request
+    ) {
+        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, request);
+    }
+
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields
+    ) {
+        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null);
     }
     @Tool(description = "Upload a file from the local file system to Zendesk to obtain an upload token for use in createTicket, updateTicket, or batchUpdateTickets")
     public AttachmentUploadResponse uploadAttachment(
@@ -445,10 +603,12 @@ public class ZendeskTools {
             @ToolArg(description = "Optional ID of the parent problem ticket to link these incidents to") @Nullable Long problemId,
             @ToolArg(description = "Required if setting problemId on tickets that are not currently incidents. Set to true to explicitly convert them.") @Nullable Boolean convertToIncident,
             @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
+            @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
+            @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
             CallToolRequest request
     ) {
         log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={})", ticketIds, asyncBulk);
-        validateKnownParameters(request, "ticketIds", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "asyncBulk", "problemId", "convertToIncident", "customFields");
+        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "asyncBulk", "problemId", "convertToIncident", "customFields", "requesterId", "type");
         if (ticketIds == null || ticketIds.isEmpty()) {
             return new BatchUpdateResponse(null, null, Collections.emptyList());
         }
@@ -471,25 +631,48 @@ public class ZendeskTools {
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
         validateProblemTarget(problemId);
 
-        if (Boolean.TRUE.equals(asyncBulk)) {
-            // Validate all target tickets first if linking to a problem
-            if (problemId != null) {
-                List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
-                        .flatMap(ticketClient::showTicket)
-                        .map(TicketResponse::getTicket)
-                        .collectList()
-                        .block();
-                
-                if (currentTickets != null) {
-                    for (Ticket currentTicket : currentTickets) {
+        final boolean isTypeUnset = type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
+        final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
+
+        if (problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM))) {
+            List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
+                    .flatMap(id -> {
+                        Mono<TicketResponse> showMono = ticketClient.showTicket(id);
+                        return showMono != null ? showMono.filter(resp -> resp != null && resp.getTicket() != null).map(TicketResponse::getTicket) : Mono.empty();
+                    })
+                    .collectList()
+                    .block();
+            if (currentTickets != null) {
+                for (Ticket currentTicket : currentTickets) {
+                    if (type != null) {
+                        validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
+                    }
+                    if (problemId != null) {
                         TicketUpdateInput testInput = new TicketUpdateInput();
                         applyProblemIdLogic(currentTicket, testInput, problemId, convertToIncident);
                     }
                 }
             }
+        }
 
+        if (Boolean.TRUE.equals(asyncBulk)) {
             List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
             TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
+            if (requesterId != null) {
+                if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
+                    throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
+                }
+                input.setRequesterId(requesterId.intValue());
+            }
+            if (type != null) {
+                if (isTypeUnset) {
+                    input.setType(null);
+                } else {
+                    input.setType(parsedType);
+                }
+            } else if (Boolean.TRUE.equals(convertToIncident)) {
+                input.setType(TicketUpdateInputType.INCIDENT);
+            }
             
             if (problemId != null) {
                 input.setProblemId(problemId.intValue());
@@ -512,14 +695,35 @@ public class ZendeskTools {
         List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
                     List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-            TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
+                    TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, parsedCustomFields);
+                    if (requesterId != null) {
+                        if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
+                            throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
+                        }
+                        input.setRequesterId(requesterId.intValue());
+                    }
+                    if (type != null) {
+                        if (isTypeUnset) {
+                            input.setType(null);
+                        } else {
+                            input.setType(parsedType);
+                        }
+                    } else if (Boolean.TRUE.equals(convertToIncident)) {
+                        input.setType(TicketUpdateInputType.INCIDENT);
+                    }
                     
                     Mono<TicketUpdateInput> inputMono;
                     if (problemId != null) {
-                        inputMono = ticketClient.showTicket(id).map(resp -> {
-                            applyProblemIdLogic(resp.getTicket(), input, problemId, convertToIncident);
-                            return input;
-                        });
+                        Mono<TicketResponse> showMono = ticketClient.showTicket(id);
+                        if (showMono != null) {
+                            inputMono = showMono.map(resp -> {
+                                Ticket currentTicket = resp.getTicket();
+                                applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
+                                return input;
+                            });
+                        } else {
+                            inputMono = Mono.just(input);
+                        }
                     } else {
                         inputMono = Mono.just(input);
                     }
@@ -537,6 +741,39 @@ public class ZendeskTools {
                 .block();
 
         return new BatchUpdateResponse(null, null, results != null ? results : Collections.emptyList());
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean asyncBulk,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            CallToolRequest request
+    ) {
+        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, null, null, request);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean asyncBulk,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields
+    ) {
+        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, null, null, null);
     }
     @Tool(description = "Get status and progress of an asynchronous Zendesk background job by its job ID")
     public JobStatusResponse getJobStatus(
