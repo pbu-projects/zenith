@@ -1,5 +1,6 @@
 package lol.pbu.tools
 
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest
 import lol.pbu.z4j.client.ArticleClient
 import lol.pbu.z4j.client.AttachmentClient
 import lol.pbu.z4j.client.CategoryClient
@@ -13,9 +14,18 @@ import lol.pbu.z4j.client.TicketFormsClient
 import lol.pbu.z4j.client.TopicClient
 import lol.pbu.z4j.client.TranslationClient
 import lol.pbu.z4j.client.ViewClient
+import lol.pbu.z4j.model.JobStatus
+import lol.pbu.z4j.model.JobStatusResponse
 import lol.pbu.z4j.model.LocaleAbbreviation
 import lol.pbu.z4j.model.SortArticleBy
 import lol.pbu.z4j.model.SortOrder
+import lol.pbu.z4j.model.Ticket
+import lol.pbu.z4j.model.TicketCreateRequest
+import lol.pbu.z4j.model.TicketResponse
+import lol.pbu.z4j.model.TicketType
+import lol.pbu.z4j.model.TicketUpdateInputType
+import lol.pbu.z4j.model.TicketUpdateRequest
+import lol.pbu.z4j.model.TicketUpdateResponse
 import spock.lang.Specification
 
 class ZendeskToolsValidationSpec extends Specification {
@@ -360,4 +370,449 @@ class ZendeskToolsValidationSpec extends Specification {
         def e = thrown(IllegalArgumentException)
         e.message.contains("Custom field must have an 'id'")
     }
+
+    def "createTicket correctly parses and applies customFields to TicketCreateInput"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        def customFieldsInput = [
+                [id: 12345L, value: "custom-value-1"],
+                [id: "67890", value: "custom-value-2"]
+        ]
+        def request = new CallToolRequest("createTicket", [
+                subject: "Test Subject",
+                comment: "Test Comment",
+                isPublic: true,
+                customFields: customFieldsInput
+        ])
+
+        when:
+        def resp = tools.createTicket(
+                "Test Subject", "Test Comment", true, null, null, null, null,
+                customFieldsInput, null, null, request
+        )
+
+        then:
+        resp != null
+        capturedReq != null
+        capturedReq.ticket != null
+        capturedReq.ticket.customFields != null
+        capturedReq.ticket.customFields.size() == 2
+        capturedReq.ticket.customFields[0].id == 12345L
+        capturedReq.ticket.customFields[0].value == "custom-value-1"
+        capturedReq.ticket.customFields[1].id == 67890L
+        capturedReq.ticket.customFields[1].value == "custom-value-2"
+    }
+
+    def "createTicket with invalid custom fields (missing id) throws IllegalArgumentException"() {
+        when:
+        tools.createTicket(
+                "Test Subject", "Test Comment", true, null, null, null, null,
+                [[value: "missing-id"]], null, null, null
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Custom field must have an 'id'")
+    }
+
+    def "createTicket fails on unrecognized parameters in CallToolRequest"() {
+        given:
+        def request = new CallToolRequest("createTicket", [
+                subject: "Test Subject",
+                comment: "Test Comment",
+                isPublic: true,
+                unrecognizedParam: "bad-data"
+        ])
+
+        when:
+        tools.createTicket(
+                "Test Subject", "Test Comment", true, null, null, null, null,
+                null, null, null, request
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Unrecognized parameter")
+        e.message.contains("unrecognizedParam")
+    }
+
+    def "createTicket accepts description in request arguments aliased to comment when comment is null"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+        def request = new CallToolRequest("createTicket", [
+                subject: "Test Subject",
+                description: "Initial description as comment",
+                isPublic: true
+        ])
+
+        when:
+        def resp = tools.createTicket(
+                "Test Subject", null, true, null, null, null, null,
+                null, null, null, request
+        )
+
+        then:
+        resp != null
+        capturedReq != null
+        capturedReq.ticket != null
+        capturedReq.ticket.comment != null
+        capturedReq.ticket.comment.body == "Initial description as comment"
+    }
+
+    def "createTicket sets requesterId on TicketCreateInput"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        when:
+        tools.createTicket(
+                "Test Subject", "Test Comment", true, null, null, null, null,
+                null, 99999L, null, null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket != null
+        (capturedReq.ticket.requesterId as Long) == 99999L
+    }
+
+    def "createTicket sets type on TicketCreateInput"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        when:
+        tools.createTicket(
+                "Test Subject", "Test Comment", true, null, null, null, null,
+                null, null, typeStr, null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket != null
+        capturedReq.ticket.type == expectedType
+
+        where:
+        typeStr     | expectedType
+        "problem"   | TicketUpdateInputType.PROBLEM
+        "incident"  | TicketUpdateInputType.INCIDENT
+        "question"  | TicketUpdateInputType.QUESTION
+        "task"      | TicketUpdateInputType.TASK
+        "none"      | null
+        ""          | null
+    }
+
+    def "createTicket with invalid type throws IllegalArgumentException"() {
+        when:
+        tools.createTicket(
+                "Test Subject", "Test Comment", true, null, null, null, null,
+                null, null, "invalid_type", null
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.toLowerCase().contains("problem")
+        e.message.toLowerCase().contains("incident")
+        e.message.toLowerCase().contains("question")
+        e.message.toLowerCase().contains("task")
+    }
+
+    def "updateTicket and batchUpdateTickets reject description parameter"() {
+        when: "description is passed to updateTicket in CallToolRequest"
+        def updateReq = new CallToolRequest("updateTicket", [
+                ticketId: 100L,
+                description: "Cannot edit description"
+        ])
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, updateReq)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.toLowerCase().contains("description")
+        e1.message.toLowerCase().contains("read-only") || e1.message.toLowerCase().contains("read only")
+        e1.message.contains("comment")
+
+        when: "description is passed to batchUpdateTickets in CallToolRequest"
+        def batchReq = new CallToolRequest("batchUpdateTickets", [
+                ticketIds: [100L, 101L],
+                description: "Cannot edit description"
+        ])
+        tools.batchUpdateTickets([100L, 101L], null, null, null, null, null, null, false, null, null, null, null, null, batchReq)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.toLowerCase().contains("description")
+        e2.message.toLowerCase().contains("read-only") || e2.message.toLowerCase().contains("read only")
+        e2.message.contains("comment")
+    }
+
+    def "updateTicket sets requesterId on TicketUpdateInput"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+
+        when:
+        tools.updateTicket(
+                100L, null, null, null, null, null, null,
+                null, null, null, 88888L, null, null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket != null
+        (capturedReq.ticket.requesterId as Long) == 88888L
+    }
+
+    def "updateTicket sets type on TicketUpdateInput"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(100L).tap {
+                type = TicketType.TASK
+                hasIncidents = false
+            }
+        })
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+
+        when:
+        tools.updateTicket(
+                100L, null, null, null, null, null, null,
+                null, null, null, null, typeStr, null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket != null
+        capturedReq.ticket.type == expectedType
+
+        where:
+        typeStr     | expectedType
+        "problem"   | TicketUpdateInputType.PROBLEM
+        "incident"  | TicketUpdateInputType.INCIDENT
+        "question"  | TicketUpdateInputType.QUESTION
+        "task"      | TicketUpdateInputType.TASK
+        "none"      | null
+        ""          | null
+    }
+
+    def "updateTicket with invalid type throws IllegalArgumentException"() {
+        when:
+        tools.updateTicket(
+                100L, null, null, null, null, null, null,
+                null, null, null, null, "invalid_type", null
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.toLowerCase().contains("problem")
+        e.message.toLowerCase().contains("incident")
+        e.message.toLowerCase().contains("question")
+        e.message.toLowerCase().contains("task")
+    }
+
+    def "updateTicket rejects type conversion on a problem parent with linked incidents"() {
+        given:
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(100L).tap {
+                id = 100L
+                type = TicketType.PROBLEM
+                hasIncidents = true
+            }
+        })
+
+        when: "attempting to change type away from problem"
+        tools.updateTicket(
+                100L, null, null, null, null, null, null,
+                null, null, null, null, targetType, null
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("ticket #100 is a parent problem with linked incidents") || e.message.contains("reassign or resolve those first")
+
+        where:
+        targetType << ["incident", "question", "task", "none", ""]
+    }
+
+    def "batchUpdateTickets sets requesterId and type on TicketUpdateInput for concurrent updates"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+                ticket = new Ticket(100L)
+            })
+        }
+
+        when:
+        def resp = tools.batchUpdateTickets(
+                [100L], null, null, null, null, null, null,
+                false, null, null, null, 77777L, "task", null
+        )
+
+        then:
+        resp != null
+        resp.results() != null
+        resp.results().size() == 1
+        resp.results()[0].success()
+        capturedReq != null
+        capturedReq.ticket != null
+        (capturedReq.ticket.requesterId as Long) == 77777L
+        capturedReq.ticket.type == TicketUpdateInputType.TASK
+    }
+
+    def "batchUpdateTickets sets requesterId and type on TicketUpdateInput for async bulk updates"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateManyTickets("100,101", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+                jobStatus = new JobStatus().tap { id = "job-456" }
+            })
+        }
+
+        when:
+        def resp = tools.batchUpdateTickets(
+                [100L, 101L], null, null, null, null, null, null,
+                true, null, null, null, 77777L, "task", null
+        )
+
+        then:
+        resp != null
+        resp.jobStatus() != null
+        resp.jobStatus().id == "job-456"
+        capturedReq != null
+        capturedReq.ticket != null
+        (capturedReq.ticket.requesterId as Long) == 77777L
+        capturedReq.ticket.type == TicketUpdateInputType.TASK
+    }
+
+    def "batchUpdateTickets with invalid type throws IllegalArgumentException"() {
+        when:
+        tools.batchUpdateTickets(
+                [100L], null, null, null, null, null, null,
+                false, null, null, null, null, "invalid_type", null
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.toLowerCase().contains("problem")
+        e.message.toLowerCase().contains("incident")
+        e.message.toLowerCase().contains("question")
+        e.message.toLowerCase().contains("task")
+    }
+
+    def "requesterId exceeding 32-bit integer range throws IllegalArgumentException across tools"() {
+        when: "createTicket with 64-bit requesterId"
+        tools.createTicket("Subject", "Comment", true, null, null, null, null, null, 382716491823L, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("exceeds 32-bit integer range")
+
+        when: "updateTicket with 64-bit requesterId"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, 382716491823L, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("exceeds 32-bit integer range")
+
+        when: "batchUpdateTickets with 64-bit requesterId (concurrent)"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, null, null, null, 382716491823L, null, null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("exceeds 32-bit integer range")
+
+        when: "batchUpdateTickets with 64-bit requesterId (asyncBulk)"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, null, null, null, 382716491823L, null, null)
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("exceeds 32-bit integer range")
+    }
+
+    def "createTicket validates comment and description parameters"() {
+        when: "both comment and description are provided with conflicting text"
+        def reqBoth = new CallToolRequest("createTicket", [
+                subject: "Subject",
+                comment: "Comment A",
+                description: "Comment B",
+                isPublic: true
+        ])
+        tools.createTicket("Subject", "Comment A", true, null, null, null, null, null, null, null, reqBoth)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Provide either 'comment' or 'description'")
+
+        when: "neither comment nor description is provided"
+        tools.createTicket("Subject", null, true, null, null, null, null, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Either 'comment' or 'description' is required")
+    }
+
+    def "parseCustomFields handles null elements and non-numeric IDs gracefully"() {
+        when: "list contains a null element"
+        def res = tools.parseCustomFields([null, [id: 123L, value: "val"]])
+
+        then:
+        res.size() == 1
+        res[0].id == 123L
+
+        when: "id is non-numeric string"
+        tools.parseCustomFields([[id: "not-a-number", value: "val"]])
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Custom field 'id' must be a numeric ID")
+    }
+
+    def "batchUpdateTickets rejects type conversion on a problem parent with linked incidents"() {
+        given:
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(100L).tap {
+                id = 100L
+                type = TicketType.PROBLEM
+                hasIncidents = true
+            }
+        })
+
+        when: "concurrent batch update attempts to change type away from problem"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, null, null, null, null, "task", null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("ticket #100 is a parent problem with linked incidents")
+
+        when: "asyncBulk batch update attempts to change type away from problem"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, null, null, null, null, "task", null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("ticket #100 is a parent problem with linked incidents")
+    }
 }
+
