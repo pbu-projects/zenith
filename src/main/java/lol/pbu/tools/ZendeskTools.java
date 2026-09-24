@@ -478,6 +478,12 @@ public class ZendeskTools {
 
     private void validateProblemTarget(Long problemId) {
         if (problemId == null) return;
+        if (problemId <= 0) {
+            throw new IllegalArgumentException("problemId must be a positive integer, got: " + problemId);
+        }
+        if (problemId > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("problemId " + problemId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits problem_id on ticket inputs to 32-bit integers.");
+        }
         try {
             Ticket problemTicket = ticketClient.showTicket(problemId).block().getTicket();
             if (problemTicket.getType() != TicketType.PROBLEM) {
@@ -527,10 +533,14 @@ public class ZendeskTools {
         log.info("MCP Tool called: updateTicket(id={})", ticketId);
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
         validateKnownParameters(request, "updateTicket", "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields", "requesterId", "type");
+        if (problemId != null && type != null) {
+            if (!type.trim().equalsIgnoreCase("incident")) {
+                throw new IllegalArgumentException("Cannot specify type '" + type + "' when linking to a problem ticket. Linked tickets must be of type 'incident'.");
+            }
+        }
+        validateProblemTarget(problemId);
         List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
         TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
-
-        validateProblemTarget(problemId);
 
         final boolean isTypeUnset = type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
         final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
@@ -642,35 +652,51 @@ public class ZendeskTools {
         }
         distinctIds = distinctIds.stream().distinct().toList();
 
+        if (distinctIds.isEmpty()) {
+            return new BatchUpdateResponse(null, null, Collections.emptyList());
+        }
+
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
+
+        if (problemId != null && type != null) {
+            if (!type.trim().equalsIgnoreCase("incident")) {
+                throw new IllegalArgumentException("Cannot specify type '" + type + "' when linking to a problem ticket. Linked tickets must be of type 'incident'.");
+            }
+        }
+
         validateProblemTarget(problemId);
 
         final boolean isTypeUnset = type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
         final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
+        List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
 
-        if (problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM))) {
-            List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
-                    .flatMap(id -> {
-                        Mono<TicketResponse> showMono = ticketClient.showTicket(id);
-                        return showMono != null ? showMono.filter(resp -> resp != null && resp.getTicket() != null).map(TicketResponse::getTicket) : Mono.empty();
-                    })
-                    .collectList()
-                    .block();
-            if (currentTickets != null) {
-                for (Ticket currentTicket : currentTickets) {
-                    if (type != null) {
-                        validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
-                    }
-                    if (problemId != null) {
-                        TicketUpdateInput testInput = new TicketUpdateInput();
-                        applyProblemIdLogic(currentTicket, testInput, problemId, convertToIncident);
+        if (Boolean.TRUE.equals(asyncBulk)) {
+            if (problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM))) {
+                List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
+                        .flatMap(id -> {
+                            Mono<TicketResponse> showMono = ticketClient.showTicket(id);
+                            if (showMono == null) {
+                                return Mono.empty();
+                            }
+                            return showMono.onErrorResume(e -> Mono.empty())
+                                    .filter(resp -> resp != null && resp.getTicket() != null)
+                                    .map(TicketResponse::getTicket);
+                        })
+                        .collectList()
+                        .block();
+                if (currentTickets != null) {
+                    for (Ticket currentTicket : currentTickets) {
+                        if (type != null) {
+                            validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
+                        }
+                        if (problemId != null) {
+                            TicketUpdateInput testInput = new TicketUpdateInput();
+                            applyProblemIdLogic(currentTicket, testInput, problemId, convertToIncident);
+                        }
                     }
                 }
             }
-        }
 
-        List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-        if (Boolean.TRUE.equals(asyncBulk)) {
             TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
             if (problemId != null) {
                 input.setProblemId(problemId.intValue());
@@ -693,27 +719,38 @@ public class ZendeskTools {
         List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
                     TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
-                    
+
                     Mono<TicketUpdateInput> inputMono;
-                    if (problemId != null) {
+                    boolean needsCurrentTicket = problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM));
+                    if (needsCurrentTicket) {
                         Mono<TicketResponse> showMono = ticketClient.showTicket(id);
                         if (showMono != null) {
-                            inputMono = showMono.map(resp -> {
-                                Ticket currentTicket = resp.getTicket();
-                                applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
-                                return input;
-                            });
+                            inputMono = showMono
+                                    .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?")))
+                                    .flatMap(resp -> {
+                                        if (resp.getTicket() == null) {
+                                            return Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?"));
+                                        }
+                                        Ticket currentTicket = resp.getTicket();
+                                        if (type != null) {
+                                            validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
+                                        }
+                                        if (problemId != null) {
+                                            applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
+                                        }
+                                        return Mono.just(input);
+                                    });
                         } else {
                             inputMono = Mono.just(input);
                         }
                     } else {
                         inputMono = Mono.just(input);
                     }
-                    
-                    return inputMono.flatMap(resolvedInput -> 
+
+                    return inputMono.flatMap(resolvedInput ->
                                 ticketClient.updateTicket(id, new TicketUpdateRequest(resolvedInput))
                             )
-                            .map(resp -> new TicketUpdateResult(id, true, resp.getTicket(), null))
+                            .map(resp -> new TicketUpdateResult(id, true, resp != null ? resp.getTicket() : null, null))
                             .onErrorResume(e -> {
                                 log.warn("Failed to update ticket {}: {}", id, e.getMessage());
                                 return Mono.just(new TicketUpdateResult(id, false, null, e.getMessage()));

@@ -801,11 +801,12 @@ class ZendeskToolsValidationSpec extends Specification {
         })
 
         when: "concurrent batch update attempts to change type away from problem"
-        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, null, null, null, null, "task", null)
+        def r1 = tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, null, null, null, null, "task", null)
 
         then:
-        def e1 = thrown(IllegalArgumentException)
-        e1.message.contains("ticket #100 is a parent problem with linked incidents")
+        r1.results().size() == 1
+        !r1.results()[0].success()
+        r1.results()[0].error().contains("ticket #100 is a parent problem with linked incidents")
 
         when: "asyncBulk batch update attempts to change type away from problem"
         tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, null, null, null, null, "task", null)
@@ -954,6 +955,133 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         def e2 = thrown(IllegalArgumentException)
         e2.message.contains("could not be retrieved")
+    }
+
+    def "validateProblemTarget throws when problemId exceeds 32-bit integer range"() {
+        when: "problemId exceeds Integer.MAX_VALUE in updateTicket"
+        tools.updateTicket(100L, null, null, null, null, null, null, ((Long) Integer.MAX_VALUE) + 1L, true, null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("exceeds 32-bit integer range")
+
+        when: "problemId exceeds Integer.MAX_VALUE in batchUpdateTickets"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, ((Long) Integer.MAX_VALUE) + 1L, true, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("exceeds 32-bit integer range")
+    }
+
+    def "validateProblemTarget throws when problemId is non-positive"() {
+        when: "problemId is zero in updateTicket"
+        tools.updateTicket(100L, null, null, null, null, null, null, 0L, true, null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message == "problemId must be a positive integer, got: 0"
+
+        when: "problemId is negative in updateTicket"
+        tools.updateTicket(100L, null, null, null, null, null, null, -10L, true, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message == "problemId must be a positive integer, got: -10"
+
+        when: "problemId is non-positive in batchUpdateTickets"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, -1L, true, null, null, null, null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message == "problemId must be a positive integer, got: -1"
+    }
+
+    def "rejects contradictory parameters when problemId is provided with type other than incident"() {
+        when: "updateTicket has problemId and type='task'"
+        tools.updateTicket(100L, null, null, null, null, null, null, 200L, true, null, null, "task", null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message == "Cannot specify type 'task' when linking to a problem ticket. Linked tickets must be of type 'incident'."
+
+        when: "updateTicket has problemId and type='problem'"
+        tools.updateTicket(100L, null, null, null, null, null, null, 200L, true, null, null, "problem", null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message == "Cannot specify type 'problem' when linking to a problem ticket. Linked tickets must be of type 'incident'."
+
+        when: "batchUpdateTickets has problemId and type='task'"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, 200L, true, null, null, "task", null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message == "Cannot specify type 'task' when linking to a problem ticket. Linked tickets must be of type 'incident'."
+
+        when: "batchUpdateTickets with asyncBulk has problemId and type='none'"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, 200L, true, null, null, "none", null)
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message == "Cannot specify type 'none' when linking to a problem ticket. Linked tickets must be of type 'incident'."
+    }
+
+    def "batchUpdateTickets with non-numeric IDs returns empty results"() {
+        when: "calling batchUpdateTickets with only invalid string IDs"
+        def resp = tools.batchUpdateTickets(["abc", "xyz", "   "] as List, null, null, null, null, null, null, false, null, null, null, null, null, null)
+
+        then:
+        resp != null
+        resp.results().isEmpty()
+        resp.jobStatus() == null
+        resp.jobStatuses() == null
+
+        when: "calling batchUpdateTickets in asyncBulk mode with only invalid string IDs"
+        def respBulk = tools.batchUpdateTickets(["bad-id"] as List, null, null, null, null, null, null, true, null, null, null, null, null, null)
+
+        then:
+        respBulk != null
+        respBulk.results().isEmpty()
+        respBulk.jobStatus() == null
+        respBulk.jobStatuses() == null
+    }
+
+    def "concurrent batchUpdateTickets isolates ticket validation failure and allows other tickets to succeed"() {
+        given:
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(100L).tap {
+                id = 100L
+                type = TicketType.PROBLEM
+                hasIncidents = true
+            }
+        })
+        ticketClient.showTicket(101L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(101L).tap {
+                id = 101L
+                type = TicketType.QUESTION
+                hasIncidents = false
+            }
+        })
+        ticketClient.updateTicket(101L, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+            ticket = new Ticket(101L).tap {
+                id = 101L
+                type = TicketType.TASK
+            }
+        })
+
+        when: "updating multiple tickets concurrently where 100L fails type validation and 101L succeeds"
+        def resp = tools.batchUpdateTickets([100L, 101L], null, null, null, null, null, null, false, null, null, null, null, "task", null)
+
+        then:
+        resp != null
+        resp.results().size() == 2
+        !resp.results()[0].success()
+        resp.results()[0].ticketId() == 100L
+        resp.results()[0].error().contains("ticket #100 is a parent problem with linked incidents")
+        resp.results()[1].success()
+        resp.results()[1].ticketId() == 101L
+        resp.results()[1].ticket() != null
+        resp.results()[1].ticket().id == 101L
     }
 }
 
