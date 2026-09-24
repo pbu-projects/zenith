@@ -1,11 +1,9 @@
 <h1>Zenith 
-<img src="src/main/docs/zenith.svg" style="height: 2em; vertical-align: middle; margin-left: 0.25em;"" alt="zenith logo"> 
+<img src="src/main/docs/zenith.svg" style="height: 2em; vertical-align: middle; margin-left: 0.25em;" alt="zenith logo"> 
 
 </h1>
 
-<p>STDIO MCP server for Zendesk.<img src="https://sonarcloud.io/api/project_badges/measure?project=pbu-projects_zenith&metric=alert_status" href="https://sonarcloud.io/summary/new_code?id=pbu-projects_zenith" style="height: 1.25em; vertical-align: middle; margin-left: 1em;"
-
-</p>
+<p>STDIO MCP server for Zendesk. <a href="https://sonarcloud.io/summary/new_code?id=pbu-projects_zenith"><img src="https://sonarcloud.io/api/project_badges/measure?project=pbu-projects_zenith&metric=alert_status" alt="Quality Gate Status" align="middle" style="height: 1.25em; vertical-align: middle; margin-left: 1em;"></a></p>
 
 
 ## Installation
