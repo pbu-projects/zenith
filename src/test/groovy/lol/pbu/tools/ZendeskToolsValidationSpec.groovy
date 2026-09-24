@@ -814,5 +814,147 @@ class ZendeskToolsValidationSpec extends Specification {
         def e2 = thrown(IllegalArgumentException)
         e2.message.contains("ticket #100 is a parent problem with linked incidents")
     }
+
+    def "overloaded tool methods execute and delegate correctly"() {
+        given:
+        ticketClient.createTicket(_ as TicketCreateRequest) >> reactor.core.publisher.Mono.just(new TicketResponse())
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+            jobStatus = new JobStatus().tap { id = "job-1" }
+        })
+
+        when: "calling createTicket 7-arg overload"
+        def r1 = tools.createTicket("Subj", "Comment", true, "low", "open", null, null)
+
+        then:
+        r1 != null
+
+        when: "calling createTicket 10-arg overload"
+        def r2 = tools.createTicket("Subj", "Comment", true, "low", "open", null, null, null, 123L, "task")
+
+        then:
+        r2 != null
+
+        when: "calling updateTicket 11-arg overload"
+        def r3 = tools.updateTicket(100L, "Comment", "open", "low", true, null, null, null, null, null, null)
+
+        then:
+        r3 != null
+
+        when: "calling batchUpdateTickets 12-arg overload"
+        def r4 = tools.batchUpdateTickets([100L], "Comment", "open", "low", true, null, null, true, null, null, null, null)
+
+        then:
+        r4 != null
+        r4.jobStatus().id == "job-1"
+
+        when: "calling batchUpdateTickets 11-arg overload"
+        def r5 = tools.batchUpdateTickets([100L], "Comment", "open", "low", true, null, null, true, null, null, null)
+
+        then:
+        r5 != null
+        r5.jobStatus().id == "job-1"
+    }
+
+    def "batchUpdateTickets supports problemId linking in both asyncBulk and concurrent modes"() {
+        given:
+        TicketUpdateRequest capturedAsyncReq = null
+        TicketUpdateRequest capturedConcReq = null
+        ticketClient.showTicket(200L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(200L).tap {
+                id = 200L
+                type = TicketType.PROBLEM
+            }
+        })
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(100L).tap {
+                id = 100L
+                type = TicketType.INCIDENT
+            }
+        })
+        ticketClient.updateManyTickets("100", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            capturedAsyncReq = req
+            reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+                jobStatus = new JobStatus().tap { id = "job-p1" }
+            })
+        }
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedConcReq = req
+            reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+                ticket = new Ticket(100L)
+            })
+        }
+
+        when: "linking problem in asyncBulk mode"
+        def rAsync = tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, 200L, null, null, null, null, null)
+
+        then:
+        rAsync.jobStatus() != null
+        capturedAsyncReq != null
+        capturedAsyncReq.ticket != null
+        capturedAsyncReq.ticket.problemId == 200
+        capturedAsyncReq.ticket.type == TicketUpdateInputType.INCIDENT
+
+        when: "linking problem in concurrent mode"
+        def rConc = tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, 200L, null, null, null, null, null)
+
+        then:
+        rConc.results() != null
+        rConc.results()[0].success()
+        capturedConcReq != null
+        capturedConcReq.ticket != null
+        capturedConcReq.ticket.problemId == 200
+        capturedConcReq.ticket.type == TicketUpdateInputType.INCIDENT
+    }
+
+    def "batchUpdateTickets handles convertToIncident fallback and update failures in concurrent mode"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+                ticket = new Ticket(100L)
+            })
+        }
+        ticketClient.updateTicket(101L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            reactor.core.publisher.Mono.error(new RuntimeException("Simulated API failure"))
+        }
+
+        when: "updating with convertToIncident=true and type=null, with one ticket failing"
+        def resp = tools.batchUpdateTickets([100L, 101L], null, null, null, null, null, null, false, null, true, null, null, null, null)
+
+        then:
+        resp.results().size() == 2
+        resp.results()[0].success()
+        capturedReq.ticket.type == TicketUpdateInputType.INCIDENT
+        !resp.results()[1].success()
+        resp.results()[1].error().contains("Simulated API failure")
+    }
+
+    def "validateProblemTarget throws on non-problem or retrieval failure"() {
+        given:
+        ticketClient.showTicket(300L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(300L).tap {
+                id = 300L
+                type = TicketType.TASK
+            }
+        })
+        ticketClient.showTicket(400L) >> reactor.core.publisher.Mono.error(new RuntimeException("Not found"))
+
+        when: "target is not a problem ticket"
+        tools.updateTicket(100L, null, null, null, null, null, null, 300L, true, null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("is not of type 'problem'")
+
+        when: "target ticket cannot be retrieved"
+        tools.updateTicket(100L, null, null, null, null, null, null, 400L, true, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("could not be retrieved")
+    }
 }
+
 
