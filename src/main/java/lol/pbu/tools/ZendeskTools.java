@@ -38,7 +38,7 @@ import java.util.HashSet;
 import java.util.Arrays;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import lol.pbu.z4j.model.TicketCustomField;
-import java.util.Objects;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 public class ZendeskTools {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskTools.class);
+    private static final String TICKET_FORMS_KEY = "ticket_forms";
 
     private final TicketClient ticketClient;
     private final SearchClient searchClient;
@@ -116,7 +117,7 @@ public class ZendeskTools {
             } else if (obj != null) {
                 try {
                     distinctIds.add(Long.parseLong(obj.toString().trim()));
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException _) {
                     log.warn("Invalid ticket ID format: {}", obj);
                 }
             }
@@ -175,11 +176,7 @@ public class ZendeskTools {
 
         int p = 1;
         while (accumulatedResponse.getResults().size() < limit) {
-            int size = Math.min(limit - accumulatedResponse.getResults().size(), 100);
-
             SearchResponse pageResponse = searchClient.list(query, resolvedInclude, null, null, p, 100)
-                    .retryWhen(reactor.util.retry.Retry.backoff(5, java.time.Duration.ofSeconds(2))
-                            .filter(throwable -> throwable.getMessage() != null && throwable.getMessage().contains("429")))
                     .block();
 
             if (pageResponse == null || pageResponse.getResults() == null || pageResponse.getResults().isEmpty()) {
@@ -272,14 +269,14 @@ public class ZendeskTools {
         if (StringUtils.isNotEmpty(priority)) {
             try {
                 input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown priority '{}', ignoring", priority);
             }
         }
         if (StringUtils.isNotEmpty(status)) {
             try {
                 input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown status '{}', ignoring", status);
             }
         }
@@ -307,8 +304,11 @@ public class ZendeskTools {
             Object value = cf.get("value");
             if (idObj == null) throw new IllegalArgumentException("Custom field must have an 'id'");
             Long id;
-            if (idObj instanceof Number) id = ((Number) idObj).longValue();
-            else id = Long.parseLong(idObj.toString());
+            if (idObj instanceof Number number) {
+                id = number.longValue();
+            } else {
+                id = Long.parseLong(idObj.toString());
+            }
             result.add(new TicketCustomField.Raw(id, value));
         }
         return result;
@@ -333,14 +333,14 @@ public class ZendeskTools {
         if (StringUtils.isNotEmpty(status)) {
             try {
                 input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown status '{}', ignoring", status);
             }
         }
         if (StringUtils.isNotEmpty(priority)) {
             try {
                 input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown priority '{}', ignoring", priority);
             }
         }
@@ -357,7 +357,7 @@ public class ZendeskTools {
             }
         } catch (IllegalArgumentException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (Exception _) {
             throw new IllegalArgumentException("Target problem ticket #" + problemId + " could not be retrieved. Does it exist?");
         }
     }
@@ -461,7 +461,7 @@ public class ZendeskTools {
             } else if (obj != null) {
                 try {
                     distinctIds.add(Long.parseLong(obj.toString().trim()));
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException _) {
                     log.warn("Invalid ticket ID format in batch update: {}", obj);
                 }
             }
@@ -475,7 +475,7 @@ public class ZendeskTools {
             // Validate all target tickets first if linking to a problem
             if (problemId != null) {
                 List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
-                        .flatMap(id -> ticketClient.showTicket(id))
+                        .flatMap(ticketClient::showTicket)
                         .map(TicketResponse::getTicket)
                         .collectList()
                         .block();
@@ -560,10 +560,51 @@ public class ZendeskTools {
         return ticketClient.showTicketField(ticketFieldId).block();
     }
 
-    @Tool(description = "List all ticket forms configured in Zendesk")
-    public TicketFormsResponse listTicketForms() {
-        log.info("MCP Tool called: listTicketForms()");
-        return ticketFormsClient.listTicketForms().block();
+    public Map<String, Object> listTicketForms() {
+        return listTicketForms(null, null);
+    }
+
+    @Tool(description = "List Zendesk ticket forms. By default returns a compact summary of active forms only to save tokens. Use getTicketForm for full form details.")
+    public Map<String, Object> listTicketForms(
+            @ToolArg(description = "Whether to include inactive forms. Defaults to false (active forms only)") @Nullable Boolean includeInactive,
+            @ToolArg(description = "Whether to return full form schemas (including conditions and field IDs) or just summary. Defaults to false (summary mode)") @Nullable Boolean fullPayload
+    ) {
+        log.info("MCP Tool called: listTicketForms(includeInactive={}, fullPayload={})", includeInactive, fullPayload);
+        TicketFormsResponse response = ticketFormsClient.listTicketForms().block();
+        if (response == null || response.getTicketForms() == null) {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put(TICKET_FORMS_KEY, Collections.emptyList());
+            return empty;
+        }
+
+        boolean activeOnly = !Boolean.TRUE.equals(includeInactive);
+        boolean isFull = Boolean.TRUE.equals(fullPayload);
+
+        List<TicketForm> forms = response.getTicketForms();
+        if (activeOnly) {
+            forms = forms.stream()
+                    .filter(f -> Boolean.TRUE.equals(f.getActive()))
+                    .collect(Collectors.toList());
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (isFull) {
+            result.put(TICKET_FORMS_KEY, forms);
+            return result;
+        }
+
+        List<Map<String, Object>> summaries = forms.stream().map(f -> {
+            Map<String, Object> s = new LinkedHashMap<>();
+            s.put("id", f.getId());
+            s.put("name", f.getName());
+            s.put("display_name", f.getDisplayName());
+            s.put("active", f.getActive());
+            s.put("default", f.getDefaultForm());
+            return s;
+        }).collect(Collectors.toList());
+
+        result.put(TICKET_FORMS_KEY, summaries);
+        return result;
     }
 
     @Tool(description = "Get details of a specific Zendesk ticket form by its numeric ID")
@@ -628,11 +669,16 @@ public class ZendeskTools {
         return viewClient.listViews().block();
     }
 
+    private static final Set<String> ALLOWED_RESOURCE_TYPES = Set.of("articles", "sections", "categories");
+
     @Tool(description = "Get tickets from a specific Zendesk view by its numeric ID")
     public TicketsResponse getViewTickets(
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: getViewTickets(viewId={})", viewId);
+        if (viewId == null) {
+            throw new IllegalArgumentException("viewId is required");
+        }
         return viewClient.listTicketsForView(viewId).block();
     }
 
@@ -647,6 +693,9 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: getView(viewId={})", viewId);
+        if (viewId == null) {
+            throw new IllegalArgumentException("viewId is required");
+        }
         return viewClient.showView(viewId).block();
     }
 
@@ -655,6 +704,9 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: executeView(viewId={})", viewId);
+        if (viewId == null) {
+            throw new IllegalArgumentException("viewId is required");
+        }
         return viewClient.executeView(viewId).block();
     }
 
@@ -663,6 +715,9 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: getViewTicketCount(viewId={})", viewId);
+        if (viewId == null) {
+            throw new IllegalArgumentException("viewId is required");
+        }
         return viewClient.countView(viewId).block();
     }
 
@@ -672,6 +727,9 @@ public class ZendeskTools {
             @ToolArg(description = "Optional locale code, e.g. 'en-us'. Defaults to 'en-us'") @Nullable String locale
     ) {
         log.info("MCP Tool called: getArticle(id={}, locale='{}')", articleId, locale);
+        if (articleId == null) {
+            throw new IllegalArgumentException("articleId is required");
+        }
         LocaleAbbreviation localeAbbr = resolveLocale(locale);
         return articleClient.showArticle(localeAbbr, articleId).block();
     }
@@ -702,20 +760,31 @@ public class ZendeskTools {
             @ToolArg(description = "The HTML body content of the article") String body,
             @ToolArg(description = "The ID of the permission group defining who can edit/publish this article") Long permissionGroupId,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale,
-            @ToolArg(description = "Optional flag indicating whether this article is a draft. Defaults to false") @Nullable Boolean draft,
+            @ToolArg(description = "Optional flag indicating whether this article is a draft. Defaults to true for safety") @Nullable Boolean draft,
             @ToolArg(description = "Optional list of label names for the article") @Nullable List<String> labelNames,
             @ToolArg(description = "Optional user segment ID defining who can view this article") @Nullable Long userSegmentId
     ) {
         log.info("MCP Tool called: createArticle(sectionId={}, title='{}')", sectionId, title);
+        if (sectionId == null) {
+            throw new IllegalArgumentException("sectionId is required");
+        }
+        if (title == null || title.isBlank()) {
+            throw new IllegalArgumentException("title is required");
+        }
+        if (body == null || body.isBlank()) {
+            throw new IllegalArgumentException("body is required");
+        }
+        if (permissionGroupId == null) {
+            throw new IllegalArgumentException("permissionGroupId is required");
+        }
         LocaleAbbreviation localeAbbr = resolveLocale(locale);
+        boolean isDraft = draft == null || draft;
         Article article = new Article()
                 .setTitle(title)
                 .setBody(body)
                 .setPermissionGroupId(permissionGroupId)
-                .setLocaleAbbreviation(localeAbbr);
-        if (draft != null) {
-            article.setDraft(draft);
-        }
+                .setLocaleAbbreviation(localeAbbr)
+                .setDraft(isDraft);
         if (labelNames != null && !labelNames.isEmpty()) {
             article.setLabelNames(labelNames);
         }
@@ -731,10 +800,18 @@ public class ZendeskTools {
             @ToolArg(description = "Optional new title of the article") @Nullable String title,
             @ToolArg(description = "Optional new HTML body content of the article") @Nullable String body,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale,
+            @ToolArg(description = "Optional flag to publish (false) or draft (true) the article") @Nullable Boolean draft,
+            @ToolArg(description = "Optional permission group ID defining who can edit/publish this article") @Nullable Long permissionGroupId,
             @ToolArg(description = "Optional list of label names for the article") @Nullable List<String> labelNames,
             @ToolArg(description = "Optional user segment ID defining who can view this article") @Nullable Long userSegmentId
     ) {
         log.info("MCP Tool called: updateArticle(articleId={})", articleId);
+        if (articleId == null) {
+            throw new IllegalArgumentException("articleId is required");
+        }
+        if (title == null && body == null && labelNames == null && userSegmentId == null && draft == null && permissionGroupId == null) {
+            throw new IllegalArgumentException("At least one field to update (title, body, labelNames, userSegmentId, draft, permissionGroupId) must be provided.");
+        }
         LocaleAbbreviation localeAbbr = resolveLocale(locale);
         Article article = new Article();
         if (title != null) {
@@ -742,6 +819,12 @@ public class ZendeskTools {
         }
         if (body != null) {
             article.setBody(body);
+        }
+        if (draft != null) {
+            article.setDraft(draft);
+        }
+        if (permissionGroupId != null) {
+            article.setPermissionGroupId(permissionGroupId);
         }
         if (labelNames != null) {
             article.setLabelNames(labelNames);
@@ -752,12 +835,19 @@ public class ZendeskTools {
         return articleClient.updateArticle(localeAbbr, articleId, new ArticleUpdateRequest(article)).block();
     }
 
-    @Tool(description = "Delete a Zendesk Help Center article by its ID")
+    @Tool(description = "Delete a Zendesk Help Center article translation for a given locale (or the article if it is the only translation). Requires confirm=true to prevent accidental deletion")
     public Map<String, Object> deleteArticle(
             @ToolArg(description = "The unique numeric ID of the article to delete") Long articleId,
+            @ToolArg(description = "Must be explicitly set to true to confirm deletion of this article") @Nullable Boolean confirm,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
     ) {
-        log.info("MCP Tool called: deleteArticle(articleId={})", articleId);
+        log.info("MCP Tool called: deleteArticle(articleId={}, confirm={})", articleId, confirm);
+        if (articleId == null) {
+            throw new IllegalArgumentException("articleId is required");
+        }
+        if (!Boolean.TRUE.equals(confirm)) {
+            throw new IllegalArgumentException("Deletion requires explicit confirmation. Set 'confirm' to true to proceed.");
+        }
         LocaleAbbreviation localeAbbr = resolveLocale(locale);
         articleClient.deleteArticle(localeAbbr, articleId).block();
         return Map.of("success", true, "deletedArticleId", articleId);
@@ -769,7 +859,11 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric ID of the parent resource") Long resourceId
     ) {
         log.info("MCP Tool called: listTranslations(resourceType='{}', resourceId={})", resourceType, resourceId);
-        return translationClient.listTranslations(resourceType, resourceId).block();
+        String validResourceType = validateResourceType(resourceType);
+        if (resourceId == null) {
+            throw new IllegalArgumentException("resourceId is required");
+        }
+        return translationClient.listTranslations(validResourceType, resourceId).block();
     }
 
     @Tool(description = "Get a specific translation for a Zendesk Help Center resource by locale")
@@ -779,7 +873,11 @@ public class ZendeskTools {
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
     ) {
         log.info("MCP Tool called: getTranslation(resourceType='{}', resourceId={}, locale='{}')", resourceType, resourceId, locale);
-        return translationClient.showTranslation(resourceType, resourceId, resolveLocale(locale)).block();
+        String validResourceType = validateResourceType(resourceType);
+        if (resourceId == null) {
+            throw new IllegalArgumentException("resourceId is required");
+        }
+        return translationClient.showTranslation(validResourceType, resourceId, resolveLocale(locale)).block();
     }
 
     @Tool(description = "List Zendesk Help Center categories")
@@ -799,6 +897,9 @@ public class ZendeskTools {
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us')") @Nullable String locale
     ) {
         log.info("MCP Tool called: getCategory(categoryId={}, locale='{}')", categoryId, locale);
+        if (categoryId == null) {
+            throw new IllegalArgumentException("categoryId is required");
+        }
         if (locale != null && !locale.isBlank()) {
             return categoryClient.showCategory(resolveLocale(locale), categoryId).block();
         }
@@ -816,6 +917,9 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric topic ID") Long topicId
     ) {
         log.info("MCP Tool called: getCommunityTopic(topicId={})", topicId);
+        if (topicId == null) {
+            throw new IllegalArgumentException("topicId is required");
+        }
         return topicClient.showTopic(topicId).block();
     }
 
@@ -835,6 +939,9 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric post ID") Long postId
     ) {
         log.info("MCP Tool called: getCommunityPost(postId={})", postId);
+        if (postId == null) {
+            throw new IllegalArgumentException("postId is required");
+        }
         return postClient.showPost(postId).block();
     }
 
@@ -843,6 +950,9 @@ public class ZendeskTools {
             @ToolArg(description = "The search query string") String query
     ) {
         log.info("MCP Tool called: searchCommunityPosts(query='{}')", query);
+        if (query == null || query.isBlank()) {
+            throw new IllegalArgumentException("query cannot be null or blank");
+        }
         return postClient.searchPosts(query).block();
     }
 
@@ -851,28 +961,72 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric post ID") Long postId
     ) {
         log.info("MCP Tool called: listCommunityPostComments(postId={})", postId);
+        if (postId == null) {
+            throw new IllegalArgumentException("postId is required");
+        }
         return postClient.listPostComments(postId).block();
+    }
+
+    private String validateResourceType(String resourceType) {
+        if (resourceType == null || resourceType.isBlank()) {
+            throw new IllegalArgumentException("resourceType is required. Allowed values are: " + ALLOWED_RESOURCE_TYPES);
+        }
+        String normalized = resourceType.trim().toLowerCase();
+        if ("article".equals(normalized)) {
+            normalized = "articles";
+        } else if ("section".equals(normalized)) {
+            normalized = "sections";
+        } else if ("category".equals(normalized)) {
+            normalized = "categories";
+        }
+        if (!ALLOWED_RESOURCE_TYPES.contains(normalized)) {
+            throw new IllegalArgumentException("Invalid resourceType: '" + resourceType + "'. Allowed values are: " + ALLOWED_RESOURCE_TYPES);
+        }
+        return normalized;
     }
 
     private LocaleAbbreviation resolveLocale(@Nullable String locale) {
         if (locale == null || locale.isBlank()) {
             return LocaleAbbreviation.ENGLISH_UNITED_STATES;
         }
-        return LocaleAbbreviation.fromValue(locale.trim());
+        String cleanLocale = locale.trim().toLowerCase();
+        if ("no".equals(cleanLocale)) {
+            return LocaleAbbreviation.NORWEGIAN;
+        }
+        try {
+            return LocaleAbbreviation.fromValue(cleanLocale);
+        } catch (IllegalArgumentException _) {
+            throw new IllegalArgumentException("Invalid locale: '" + locale + "'. Expected a standard locale code such as 'en-us', 'es', 'fr', 'de', 'ja', etc.");
+        }
     }
 
     private SortArticleBy resolveSortArticleBy(@Nullable String sortBy) {
         if (sortBy == null || sortBy.isBlank()) {
             return null;
         }
-        return SortArticleBy.fromValue(sortBy.trim().toLowerCase());
+        String cleanSort = sortBy.trim().toLowerCase();
+        try {
+            return SortArticleBy.fromValue(cleanSort);
+        } catch (IllegalArgumentException _) {
+            throw new IllegalArgumentException("Invalid sortBy: '" + sortBy + "'. Allowed values are: position, title, created_at, updated_at, edited_at");
+        }
     }
 
     private SortOrder resolveSortOrder(@Nullable String sortOrder) {
         if (sortOrder == null || sortOrder.isBlank()) {
             return null;
         }
-        return SortOrder.fromValue(sortOrder.trim().toLowerCase());
+        String cleanOrder = sortOrder.trim().toLowerCase();
+        if ("ascending".equals(cleanOrder)) {
+            cleanOrder = "asc";
+        } else if ("descending".equals(cleanOrder)) {
+            cleanOrder = "desc";
+        }
+        try {
+            return SortOrder.fromValue(cleanOrder);
+        } catch (IllegalArgumentException _) {
+            throw new IllegalArgumentException("Invalid sortOrder: '" + sortOrder + "'. Allowed values are: 'asc' or 'desc'");
+        }
     }
 
 }

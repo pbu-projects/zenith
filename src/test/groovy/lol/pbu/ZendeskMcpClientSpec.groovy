@@ -51,6 +51,12 @@ class ZendeskMcpClientSpec extends Specification {
             }
         }
 
+        // Forward JaCoCo coverage agent to subprocess if test execution is instrumented
+        def jacocoAgent = java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments().find { it.startsWith("-javaagent") && it.contains("jacoco") }
+        if (jacocoAgent) {
+            envMap.put("JAVA_OPTS", jacocoAgent)
+        }
+
         // Enforce that live Zendesk environment credentials are configured
         def zendeskUrl = envMap.get("ZENDESK_URL")
         def hasAuth = (envMap.get("ZENDESK_CLIENT_ID") && envMap.get("ZENDESK_CLIENT_SECRET")) || envMap.get("ZENDESK_OAUTH_TOKEN")
@@ -294,7 +300,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails with an informative error"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         true
     }
 
@@ -306,7 +312,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails mentioning the unrecognized parameter"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         true
     }
 
@@ -318,7 +324,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails requiring isPublic"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         
         true
     }
@@ -343,7 +349,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails requiring isPublic"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         
         true
     }
@@ -439,5 +445,116 @@ class ZendeskMcpClientSpec extends Specification {
         then: "it succeeds"
         postsResult != null
         !Boolean.TRUE.equals(postsResult.isError())
+    }
+
+    def "23. Test deleteArticle requires explicit confirm=true"() {
+        when: "client calls deleteArticle without confirm=true"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("deleteArticle", [
+                articleId: 12345L,
+                confirm: false
+        ]))
+
+        then: "it fails requiring explicit confirmation"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e.jsonRpcError.code == -32602
+        e.message.contains("Deletion requires explicit confirmation")
+    }
+
+    def "24. Test listTranslations validates resourceType against allowlist"() {
+        when: "client provides an invalid resource type"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listTranslations", [
+                resourceType: "unsupported_resource",
+                resourceId: 123L
+        ]))
+
+        then: "it rejects the request with an allowlist validation error"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e.jsonRpcError.code == -32602
+        e.message.contains("Invalid resourceType")
+    }
+
+    def "25. Test updateArticle rejects empty update payloads"() {
+        when: "client calls updateArticle without specifying any fields to update"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("updateArticle", [
+                articleId: 12345L
+        ]))
+
+        then: "it fails requiring at least one field to update"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e.jsonRpcError.code == -32602
+        e.message.contains("At least one field to update")
+    }
+
+    def "26. Test listArticles returns clear error for invalid locale"() {
+        when: "client provides an unsupported locale string"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listArticles", [
+                locale: "invalid-locale"
+        ]))
+
+        then: "it fails with a descriptive locale validation error"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e.jsonRpcError.code == -32602
+        e.message.contains("Invalid locale")
+    }
+
+    def "27. Test createArticle requires essential parameters"() {
+        when: "client calls createArticle missing required title"
+        def result = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("createArticle", [
+                sectionId: 100L,
+                body: "Body without title",
+                permissionGroupId: 200L
+        ]))
+
+        then: "it fails schema validation or argument check"
+        result != null
+        Boolean.TRUE.equals(result.isError())
+    }
+
+    def "28. Test searchCommunityPosts requires non-blank query"() {
+        when: "client searches community posts with empty query"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("searchCommunityPosts", [
+                query: "   "
+        ]))
+
+        then: "it fails validation"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e.jsonRpcError.code == -32602
+        e.message.contains("query cannot be null or blank")
+    }
+
+    def "29. Test listTicketForms returns summary of active forms by default"() {
+        when: "client calls listTicketForms with default parameters"
+        def result = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listTicketForms", [:]))
+
+        then: "it returns successful result with ticket_forms array"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+        def text = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().first()).text()
+        text.contains('"ticket_forms"')
+        !text.contains('"ticketForms"')
+
+        when: "client calls listTicketForms requesting full payload"
+        def fullResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listTicketForms", [
+                includeInactive: true,
+                fullPayload: true
+        ]))
+
+        then: "it returns full form schemas successfully"
+        fullResult != null
+        !Boolean.TRUE.equals(fullResult.isError())
+    }
+
+    def "30. Test Zendesk API errors propagate diagnostic messages (Issue #22)"() {
+        when: "client searches with invalid Zendesk search query syntax"
+        mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("search", [
+                query: "type:problem"
+        ]))
+
+        then: "it fails with an informative error from Zendesk API rather than 'message must not be empty'"
+        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        e.message.contains("Zendesk API error")
+        !e.message.contains("message must not be empty")
     }
 }

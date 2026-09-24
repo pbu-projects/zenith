@@ -76,14 +76,26 @@ public class ZendeskTokenProvider {
         try {
             refreshClientCredentialsToken();
             return Optional.ofNullable(cachedToken);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Failed to acquire Zendesk OAuth token due to thread interruption", e);
+            cachedToken = null;
+            tokenExpiresAtMs = 0L;
+            return Optional.empty();
         } catch (Exception e) {
             log.error("Failed to acquire Zendesk OAuth token using client_credentials", e);
-            return Optional.ofNullable(cachedToken);
+            cachedToken = null;
+            tokenExpiresAtMs = 0L;
+            return Optional.empty();
         }
     }
 
     private void refreshClientCredentialsToken() throws IOException, InterruptedException {
-        String tokenUrl = zendeskUrl.replaceAll("/+$", "") + "/oauth/tokens";
+        String baseUrl = zendeskUrl;
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        String tokenUrl = baseUrl + "/oauth/tokens";
         log.info("Requesting new OAuth token from Zendesk: {}", tokenUrl);
 
         String formBody = "grant_type=client_credentials"
