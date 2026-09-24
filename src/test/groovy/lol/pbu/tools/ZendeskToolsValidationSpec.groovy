@@ -191,4 +191,42 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         thrown(IllegalArgumentException)
     }
+
+    def "successfully executes Help Center, Translations, and Community tools happy paths"() {
+        given:
+        articleClient.createArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
+        articleClient.updateArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
+        articleClient.deleteArticle(*_) >> reactor.core.publisher.Mono.empty()
+        translationClient.listTranslations(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TranslationsResponse())
+        translationClient.showTranslation(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TranslationResponse())
+        categoryClient.listCategories(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
+        categoryClient.listCategoriesNoLocale(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
+        categoryClient.showCategory(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoryResponse())
+        categoryClient.showCategoryNoLocale(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoryResponse())
+        topicClient.showTopic(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TopicResponse())
+        topicClient.listTopics() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TopicsResponse())
+        postClient.showPost(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostResponse())
+        postClient.listPosts() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostsResponse())
+        postClient.listPostsByTopic(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostsResponse())
+        postClient.searchPosts(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CommunityPostSearchResponse())
+        postClient.listPostComments(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostCommentsResponse())
+
+        expect:
+        tools.createArticle(1L, "Title", "<p>Body</p>", 2L, "en-us", false, ["label1"], 3L) != null
+        tools.updateArticle(1L, "New Title", null, "en-us", null, null, null, null) != null
+        tools.deleteArticle(1L, true, "en-us") == [success: true, deletedArticleId: 1L]
+        tools.listTranslations("articles", 1L) != null
+        tools.getTranslation("articles", 1L, "en-us") != null
+        tools.listCategories("en-us") != null
+        tools.listCategories(null) != null
+        tools.getCategory(1L, "en-us") != null
+        tools.getCategory(1L, null) != null
+        tools.listCommunityTopics() != null
+        tools.getCommunityTopic(1L) != null
+        tools.listCommunityPosts(1L) != null
+        tools.listCommunityPosts(null) != null
+        tools.getCommunityPost(1L) != null
+        tools.searchCommunityPosts("query") != null
+        tools.listCommunityPostComments(1L) != null
+    }
 }
