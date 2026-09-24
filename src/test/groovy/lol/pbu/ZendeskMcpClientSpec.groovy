@@ -51,6 +51,12 @@ class ZendeskMcpClientSpec extends Specification {
             }
         }
 
+        // Forward JaCoCo coverage agent to subprocess if test execution is instrumented
+        def jacocoAgent = java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments().find { it.startsWith("-javaagent") && it.contains("jacoco") }
+        if (jacocoAgent) {
+            envMap.put("JAVA_OPTS", jacocoAgent)
+        }
+
         // Enforce that live Zendesk environment credentials are configured
         def zendeskUrl = envMap.get("ZENDESK_URL")
         def hasAuth = (envMap.get("ZENDESK_CLIENT_ID") && envMap.get("ZENDESK_CLIENT_SECRET")) || envMap.get("ZENDESK_OAUTH_TOKEN")
