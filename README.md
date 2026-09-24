@@ -81,11 +81,10 @@ Add to your MCP client config:
 * `getCommunityPost`: Fetch details of a community post by numeric ID.
 * `searchCommunityPosts`: Search community posts matching query text.
 * `listCommunityPostComments`: List comments for a community post.
-* `getToolVersion`: Get the version of the MCP server.
 
 ## Resources
 
-* `zendesk-best-practices` (`docs://zendesk/best-practices`): Operational guidance and best practices for Zendesk administration, API usage, rate limit quotas, search sideloading, ticket audit/trigger debugging, and batch operations.
+* `serverVersion` (`zenith://version`): Get the version of the MCP server.
 
 ## Contributing
 
