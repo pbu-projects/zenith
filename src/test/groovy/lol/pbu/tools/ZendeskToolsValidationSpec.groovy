@@ -71,6 +71,43 @@ class ZendeskToolsValidationSpec extends Specification {
         e.message.contains("At least one field to update")
     }
 
+    def "createArticle and getArticle require valid parameters"() {
+        when: "sectionId is null"
+        tools.createArticle(null, "Title", "Body", 1L, "en-us", false, null, null)
+        then:
+        thrown(IllegalArgumentException)
+
+        when: "title is null"
+        tools.createArticle(1L, null, "Body", 1L, "en-us", false, null, null)
+        then:
+        thrown(IllegalArgumentException)
+
+        when: "title is blank"
+        tools.createArticle(1L, "   ", "Body", 1L, "en-us", false, null, null)
+        then:
+        thrown(IllegalArgumentException)
+
+        when: "body is null"
+        tools.createArticle(1L, "Title", null, 1L, "en-us", false, null, null)
+        then:
+        thrown(IllegalArgumentException)
+
+        when: "body is blank"
+        tools.createArticle(1L, "Title", "   ", 1L, "en-us", false, null, null)
+        then:
+        thrown(IllegalArgumentException)
+
+        when: "permissionGroupId is null"
+        tools.createArticle(1L, "Title", "Body", null, "en-us", false, null, null)
+        then:
+        thrown(IllegalArgumentException)
+
+        when: "articleId is null"
+        tools.getArticle(null, "en-us")
+        then:
+        thrown(IllegalArgumentException)
+    }
+
     def "view tools require viewId"() {
         when:
         tools.getViewTickets(null)
@@ -175,6 +212,8 @@ class ZendeskToolsValidationSpec extends Specification {
         tools.validateResourceType("section") == "sections"
         tools.validateResourceType("category") == "categories"
         tools.validateResourceType("articles") == "articles"
+        tools.validateResourceType("sections") == "sections"
+        tools.validateResourceType("categories") == "categories"
 
         when:
         tools.resolveLocale("invalid-locale-xyz")
@@ -192,11 +231,19 @@ class ZendeskToolsValidationSpec extends Specification {
         thrown(IllegalArgumentException)
     }
 
-    def "successfully executes Help Center, Translations, and Community tools happy paths"() {
+    def "successfully executes Help Center, Views, Translations, and Community tools happy paths"() {
         given:
         articleClient.createArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
         articleClient.updateArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
         articleClient.deleteArticle(*_) >> reactor.core.publisher.Mono.empty()
+        articleClient.listArticles(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticlesResponse())
+        articleClient.showArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
+        viewClient.listViews() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewsResponse())
+        viewClient.listActiveViews() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewsResponse())
+        viewClient.listTicketsForView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TicketsResponse())
+        viewClient.showView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewResponse())
+        viewClient.executeView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewExecuteResponse())
+        viewClient.countView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewCountResponse())
         translationClient.listTranslations(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TranslationsResponse())
         translationClient.showTranslation(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TranslationResponse())
         categoryClient.listCategories(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
@@ -213,8 +260,20 @@ class ZendeskToolsValidationSpec extends Specification {
 
         expect:
         tools.createArticle(1L, "Title", "<p>Body</p>", 2L, "en-us", false, ["label1"], 3L) != null
+        tools.createArticle(1L, "Draft Article", "<p>Body</p>", 2L, "en-us", null, null, null) != null
         tools.updateArticle(1L, "New Title", null, "en-us", null, null, null, null) != null
+        tools.updateArticle(1L, "New Title", "New Body", "en-us", true, 2L, ["label1"], 5L) != null
         tools.deleteArticle(1L, true, "en-us") == [success: true, deletedArticleId: 1L]
+        tools.listArticles("en-us", "title", "asc", 1000L, "label1,label2") != null
+        tools.listArticles(null, null, null, null, null) != null
+        tools.getArticle(1L, "en-us") != null
+        tools.getArticle(1L, null) != null
+        tools.listViews() != null
+        tools.listActiveViews() != null
+        tools.getView(1L) != null
+        tools.getViewTickets(1L) != null
+        tools.executeView(1L) != null
+        tools.getViewTicketCount(1L) != null
         tools.listTranslations("articles", 1L) != null
         tools.getTranslation("articles", 1L, "en-us") != null
         tools.listCategories("en-us") != null
@@ -228,5 +287,77 @@ class ZendeskToolsValidationSpec extends Specification {
         tools.getCommunityPost(1L) != null
         tools.searchCommunityPosts("query") != null
         tools.listCommunityPostComments(1L) != null
+    }
+
+    def "listTicketForms handles full payload, summary mode, active filtering, and empty responses"() {
+        given:
+        def form1 = new lol.pbu.z4j.model.TicketForm().tap {
+            id = 1L
+            name = "Form 1"
+            displayName = "Display 1"
+            active = true
+            defaultForm = true
+        }
+        def form2 = new lol.pbu.z4j.model.TicketForm().tap {
+            id = 2L
+            name = "Form 2"
+            displayName = "Display 2"
+            active = false
+            defaultForm = false
+        }
+        def responseWithForms = new lol.pbu.z4j.model.TicketFormsResponse().tap {
+            ticketForms = [form1, form2]
+        }
+        def emptyResponse = new lol.pbu.z4j.model.TicketFormsResponse().tap {
+            ticketForms = null
+        }
+
+        when: "response is null or empty"
+        ticketFormsClient.listTicketForms() >>> [
+                reactor.core.publisher.Mono.empty(),
+                reactor.core.publisher.Mono.just(emptyResponse),
+                reactor.core.publisher.Mono.just(responseWithForms),
+                reactor.core.publisher.Mono.just(responseWithForms),
+                reactor.core.publisher.Mono.just(responseWithForms)
+        ]
+
+        def rNull = tools.listTicketForms()
+        def rEmpty = tools.listTicketForms(null, null)
+        def rSummaryActiveOnly = tools.listTicketForms(false, false)
+        def rSummaryAll = tools.listTicketForms(true, false)
+        def rFullAll = tools.listTicketForms(true, true)
+
+        then:
+        rNull.ticket_forms == []
+        rEmpty.ticket_forms == []
+        rSummaryActiveOnly.ticket_forms.size() == 1
+        rSummaryActiveOnly.ticket_forms[0].id == 1L
+        rSummaryAll.ticket_forms.size() == 2
+        rFullAll.ticket_forms.size() == 2
+        rFullAll.ticket_forms[0] instanceof lol.pbu.z4j.model.TicketForm
+    }
+
+    def "parseCustomFields handles various inputs and validates custom fields"() {
+        when:
+        def resNull = tools.parseCustomFields(null)
+        def resEmpty = tools.parseCustomFields([])
+        def resValid = tools.parseCustomFields([
+                [id: 100L, value: "val1"],
+                [id: "200", value: "val2"]
+        ])
+
+        then:
+        resNull.isEmpty()
+        resEmpty.isEmpty()
+        resValid.size() == 2
+        resValid[0].id == 100L
+        resValid[1].id == 200L
+
+        when: "custom field missing id"
+        tools.parseCustomFields([[value: "no-id"]])
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Custom field must have an 'id'")
     }
 }

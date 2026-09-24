@@ -117,4 +117,53 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
         mcpError.message.contains("... [truncated]")
         mcpError.message.length() < 600
     }
+
+    def "handles ratelimit-reset header when Retry-After is absent"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("ratelimit-reset", "30")
+        def ex = new HttpClientResponseException("Too Many Requests", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32029
+        mcpError.message.contains("30 seconds")
+    }
+
+    def "handles HTTP 429 without rate limit headers"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.TOO_MANY_REQUESTS)
+        def ex = new HttpClientResponseException("Too Many Requests", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32029
+        mcpError.message.contains("Please pause before retrying")
+    }
+
+    def "formats JSON error diagnostics with message field and empty body fallback"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST)
+                .body('{"error":"Forbidden","message":"Access Denied"}')
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("Forbidden - Access Denied")
+
+        when: "empty body"
+        def emptyEx = new HttpClientResponseException("Empty Bad Request", HttpResponse.status(HttpStatus.BAD_REQUEST).body(""))
+        def emptyMcpError = mapper.map(emptyEx)
+
+        then:
+        emptyMcpError.message.contains("Empty Bad Request")
+    }
 }
+

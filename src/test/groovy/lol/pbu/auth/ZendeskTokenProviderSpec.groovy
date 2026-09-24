@@ -25,7 +25,7 @@ class ZendeskTokenProviderSpec extends Specification {
 
     def "clears expired token and returns empty when refresh fails"() {
         given:
-        def provider = new ZendeskTokenProvider("http://localhost:1", "client-id", "client-secret", null, "read", objectMapper)
+        def provider = new ZendeskTokenProvider("http://localhost:1/", "client-id", "client-secret", null, "read", objectMapper)
         provider.cachedToken = "old-expired-token"
         provider.tokenExpiresAtMs = System.currentTimeMillis() - 100_000L
 
