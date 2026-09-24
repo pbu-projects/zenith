@@ -79,10 +79,14 @@ public class ZendeskTokenProvider {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Failed to acquire Zendesk OAuth token due to thread interruption", e);
-            return Optional.ofNullable(cachedToken);
+            cachedToken = null;
+            tokenExpiresAtMs = 0L;
+            return Optional.empty();
         } catch (Exception e) {
             log.error("Failed to acquire Zendesk OAuth token using client_credentials", e);
-            return Optional.ofNullable(cachedToken);
+            cachedToken = null;
+            tokenExpiresAtMs = 0L;
+            return Optional.empty();
         }
     }
 
