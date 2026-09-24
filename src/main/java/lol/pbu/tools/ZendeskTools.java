@@ -38,7 +38,6 @@ import java.util.HashSet;
 import java.util.Arrays;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import lol.pbu.z4j.model.TicketCustomField;
-import java.util.Objects;
 import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 
@@ -49,6 +48,8 @@ import java.util.stream.Collectors;
 public class ZendeskTools {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskTools.class);
+    private static final String TICKET_FORMS_KEY = "ticket_forms";
+    private static final String TICKET_FORMS_CAMEL_KEY = "ticketForms";
 
     private final TicketClient ticketClient;
     private final SearchClient searchClient;
@@ -117,7 +118,7 @@ public class ZendeskTools {
             } else if (obj != null) {
                 try {
                     distinctIds.add(Long.parseLong(obj.toString().trim()));
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException _) {
                     log.warn("Invalid ticket ID format: {}", obj);
                 }
             }
@@ -176,8 +177,6 @@ public class ZendeskTools {
 
         int p = 1;
         while (accumulatedResponse.getResults().size() < limit) {
-            int size = Math.min(limit - accumulatedResponse.getResults().size(), 100);
-
             SearchResponse pageResponse = searchClient.list(query, resolvedInclude, null, null, p, 100)
                     .block();
 
@@ -271,14 +270,14 @@ public class ZendeskTools {
         if (StringUtils.isNotEmpty(priority)) {
             try {
                 input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown priority '{}', ignoring", priority);
             }
         }
         if (StringUtils.isNotEmpty(status)) {
             try {
                 input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown status '{}', ignoring", status);
             }
         }
@@ -306,8 +305,11 @@ public class ZendeskTools {
             Object value = cf.get("value");
             if (idObj == null) throw new IllegalArgumentException("Custom field must have an 'id'");
             Long id;
-            if (idObj instanceof Number) id = ((Number) idObj).longValue();
-            else id = Long.parseLong(idObj.toString());
+            if (idObj instanceof Number number) {
+                id = number.longValue();
+            } else {
+                id = Long.parseLong(idObj.toString());
+            }
             result.add(new TicketCustomField.Raw(id, value));
         }
         return result;
@@ -332,14 +334,14 @@ public class ZendeskTools {
         if (StringUtils.isNotEmpty(status)) {
             try {
                 input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown status '{}', ignoring", status);
             }
         }
         if (StringUtils.isNotEmpty(priority)) {
             try {
                 input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 log.warn("Unknown priority '{}', ignoring", priority);
             }
         }
@@ -356,7 +358,7 @@ public class ZendeskTools {
             }
         } catch (IllegalArgumentException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (Exception _) {
             throw new IllegalArgumentException("Target problem ticket #" + problemId + " could not be retrieved. Does it exist?");
         }
     }
@@ -460,7 +462,7 @@ public class ZendeskTools {
             } else if (obj != null) {
                 try {
                     distinctIds.add(Long.parseLong(obj.toString().trim()));
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException _) {
                     log.warn("Invalid ticket ID format in batch update: {}", obj);
                 }
             }
@@ -474,7 +476,7 @@ public class ZendeskTools {
             // Validate all target tickets first if linking to a problem
             if (problemId != null) {
                 List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
-                        .flatMap(id -> ticketClient.showTicket(id))
+                        .flatMap(ticketClient::showTicket)
                         .map(TicketResponse::getTicket)
                         .collectList()
                         .block();
@@ -572,8 +574,8 @@ public class ZendeskTools {
         TicketFormsResponse response = ticketFormsClient.listTicketForms().block();
         if (response == null || response.getTicketForms() == null) {
             Map<String, Object> empty = new LinkedHashMap<>();
-            empty.put("ticket_forms", Collections.emptyList());
-            empty.put("ticketForms", Collections.emptyList());
+            empty.put(TICKET_FORMS_KEY, Collections.emptyList());
+            empty.put(TICKET_FORMS_CAMEL_KEY, Collections.emptyList());
             return empty;
         }
 
@@ -589,8 +591,8 @@ public class ZendeskTools {
 
         Map<String, Object> result = new LinkedHashMap<>();
         if (isFull) {
-            result.put("ticket_forms", forms);
-            result.put("ticketForms", forms);
+            result.put(TICKET_FORMS_KEY, forms);
+            result.put(TICKET_FORMS_CAMEL_KEY, forms);
             return result;
         }
 
@@ -604,8 +606,8 @@ public class ZendeskTools {
             return s;
         }).collect(Collectors.toList());
 
-        result.put("ticket_forms", summaries);
-        result.put("ticketForms", summaries);
+        result.put(TICKET_FORMS_KEY, summaries);
+        result.put(TICKET_FORMS_CAMEL_KEY, summaries);
         return result;
     }
 
@@ -997,7 +999,7 @@ public class ZendeskTools {
         }
         try {
             return LocaleAbbreviation.fromValue(cleanLocale);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             throw new IllegalArgumentException("Invalid locale: '" + locale + "'. Expected a standard locale code such as 'en-us', 'es', 'fr', 'de', 'ja', etc.");
         }
     }
@@ -1009,7 +1011,7 @@ public class ZendeskTools {
         String cleanSort = sortBy.trim().toLowerCase();
         try {
             return SortArticleBy.fromValue(cleanSort);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             throw new IllegalArgumentException("Invalid sortBy: '" + sortBy + "'. Allowed values are: position, title, created_at, updated_at, edited_at");
         }
     }
@@ -1026,7 +1028,7 @@ public class ZendeskTools {
         }
         try {
             return SortOrder.fromValue(cleanOrder);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             throw new IllegalArgumentException("Invalid sortOrder: '" + sortOrder + "'. Allowed values are: 'asc' or 'desc'");
         }
     }

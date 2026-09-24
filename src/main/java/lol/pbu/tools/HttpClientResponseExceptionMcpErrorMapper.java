@@ -40,32 +40,12 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     @Override
     public McpError map(HttpClientResponseException e) {
         HttpResponse<?> response = e.getResponse();
-        int statusCode = response != null ? response.code() : (e.getStatus() != null ? e.getStatus().getCode() : 500);
-        String reason = response != null ? response.reason() : (e.getStatus() != null ? e.getStatus().getReason() : "Internal Error");
+        int statusCode = resolveStatusCode(response, e);
+        String reason = resolveReason(response, e);
 
         // Explicit handling for HTTP 429 (Too Many Requests / Rate Limited)
         if (statusCode == 429) {
-            String retryAfter = response != null ? response.header("Retry-After") : null;
-            String resetSeconds = response != null ? response.header("ratelimit-reset") : null;
-            String waitTime = (retryAfter != null && !retryAfter.isBlank()) ? retryAfter.trim() : (resetSeconds != null ? resetSeconds.trim() : null);
-
-            String rateLimitMsg;
-            if (waitTime != null && !waitTime.isBlank()) {
-                boolean isNumeric = waitTime.chars().allMatch(Character::isDigit);
-                rateLimitMsg = isNumeric
-                        ? String.format("Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. You must wait %s seconds before sending further requests.", waitTime)
-                        : String.format("Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Retry after: %s.", waitTime);
-            } else {
-                rateLimitMsg = "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Please pause before retrying.";
-            }
-
-            log.warn("Mapping HTTP 429 Rate Limit to MCP error: {}", rateLimitMsg);
-
-            // Use -32029 (within JSON-RPC reserved server-error range -32000 to -32099)
-            // so LLM agents recognize this as an upstream rate limit and DO NOT treat it as invalid arguments (-32602).
-            return McpError.builder(-32029)
-                    .message(rateLimitMsg)
-                    .build();
+            return handleRateLimit(response);
         }
 
         String diagnosis = extractZendeskErrorMessage(response);
@@ -76,22 +56,78 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         String formattedMessage = String.format("Zendesk API error (HTTP %d %s): %s", statusCode, reason, diagnosis);
         log.warn("Mapping HttpClientResponseException to MCP error: {}", formattedMessage);
 
-        // Differentiate client argument errors (400, 422) from auth/server errors (401, 403, 5xx)
-        int mcpErrorCode;
-        if (statusCode == 400 || statusCode == 422) {
-            mcpErrorCode = -32602; // Invalid params
-        } else if (statusCode == 404) {
-            mcpErrorCode = -32002; // Resource Not Found
-        } else {
-            mcpErrorCode = -32603; // Internal / Upstream Error
-        }
-
+        int mcpErrorCode = resolveMcpErrorCode(statusCode);
         return McpError.builder(mcpErrorCode)
                 .message(formattedMessage)
                 .build();
     }
 
-    @SuppressWarnings("unchecked")
+    private int resolveStatusCode(HttpResponse<?> response, HttpClientResponseException e) {
+        if (response != null) {
+            return response.code();
+        }
+        if (e.getStatus() != null) {
+            return e.getStatus().getCode();
+        }
+        return 500;
+    }
+
+    private String resolveReason(HttpResponse<?> response, HttpClientResponseException e) {
+        if (response != null) {
+            return response.reason();
+        }
+        if (e.getStatus() != null) {
+            return e.getStatus().getReason();
+        }
+        return "Internal Error";
+    }
+
+    private int resolveMcpErrorCode(int statusCode) {
+        return switch (statusCode) {
+            case 400, 422 -> -32602; // Invalid params
+            case 404 -> -32002;      // Resource Not Found
+            default -> -32603;       // Internal / Upstream Error
+        };
+    }
+
+    private McpError handleRateLimit(HttpResponse<?> response) {
+        String waitTime = resolveWaitTime(response);
+        String rateLimitMsg = formatRateLimitMessage(waitTime);
+        log.warn("Mapping HTTP 429 Rate Limit to MCP error: {}", rateLimitMsg);
+
+        // Use -32029 (within JSON-RPC reserved server-error range -32000 to -32099)
+        // so LLM agents recognize this as an upstream rate limit and DO NOT treat it as invalid arguments (-32602).
+        return McpError.builder(-32029)
+                .message(rateLimitMsg)
+                .build();
+    }
+
+    private String resolveWaitTime(HttpResponse<?> response) {
+        if (response == null) {
+            return null;
+        }
+        String retryAfter = response.header("Retry-After");
+        if (retryAfter != null && !retryAfter.isBlank()) {
+            return retryAfter.trim();
+        }
+        String resetSeconds = response.header("ratelimit-reset");
+        if (resetSeconds != null && !resetSeconds.isBlank()) {
+            return resetSeconds.trim();
+        }
+        return null;
+    }
+
+    private String formatRateLimitMessage(String waitTime) {
+        if (waitTime == null || waitTime.isBlank()) {
+            return "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Please pause before retrying.";
+        }
+        boolean isNumeric = waitTime.chars().allMatch(Character::isDigit);
+        String template = isNumeric
+                ? "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. You must wait %s seconds before sending further requests."
+                : "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Retry after: %s.";
+        return String.format(template, waitTime);
+    }
+
     private String extractZendeskErrorMessage(HttpResponse<?> response) {
         if (response == null) {
             return null;
@@ -105,41 +141,9 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             return null;
         }
 
-        try {
-            Map<String, Object> map = objectMapper.readValue(body, Map.class);
-            if (map != null) {
-                Object errorObj = map.get("error");
-                Object descObj = map.get("description");
-                Object msgObj = map.get("message");
-                Object detailsObj = map.get("details");
-
-                StringBuilder sb = new StringBuilder();
-                if (errorObj != null) {
-                    sb.append(errorObj);
-                }
-                if (descObj != null) {
-                    if (sb.length() > 0) {
-                        sb.append(" - ");
-                    }
-                    sb.append(descObj);
-                } else if (msgObj != null && !msgObj.equals(errorObj)) {
-                    if (sb.length() > 0) {
-                        sb.append(" - ");
-                    }
-                    sb.append(msgObj);
-                }
-                if (detailsObj != null) {
-                    if (sb.length() > 0) {
-                        sb.append(": ");
-                    }
-                    sb.append(detailsObj);
-                }
-                if (sb.length() > 0) {
-                    return sb.toString();
-                }
-            }
-        } catch (Exception parseEx) {
-            log.debug("Could not parse Zendesk error response body as JSON: {}", parseEx.getMessage());
+        String jsonDiagnostic = parseJsonDiagnostic(body);
+        if (jsonDiagnostic != null) {
+            return jsonDiagnostic;
         }
 
         if (body.startsWith("<") || body.contains("<html") || body.contains("<HTML")) {
@@ -149,5 +153,47 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             return body.substring(0, 500) + "... [truncated]";
         }
         return body;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String parseJsonDiagnostic(String body) {
+        try {
+            Map<String, Object> map = objectMapper.readValue(body, Map.class);
+            if (map == null) {
+                return null;
+            }
+            Object errorObj = map.get("error");
+            Object descObj = map.get("description");
+            Object msgObj = map.get("message");
+            Object detailsObj = map.get("details");
+
+            StringBuilder sb = new StringBuilder();
+            if (errorObj != null) {
+                sb.append(errorObj);
+            }
+            if (descObj != null) {
+                if (!sb.isEmpty()) {
+                    sb.append(" - ");
+                }
+                sb.append(descObj);
+            } else if (msgObj != null && !msgObj.equals(errorObj)) {
+                if (!sb.isEmpty()) {
+                    sb.append(" - ");
+                }
+                sb.append(msgObj);
+            }
+            if (detailsObj != null) {
+                if (!sb.isEmpty()) {
+                    sb.append(": ");
+                }
+                sb.append(detailsObj);
+            }
+            if (!sb.isEmpty()) {
+                return sb.toString();
+            }
+        } catch (Exception parseEx) {
+            log.debug("Could not parse Zendesk error response body as JSON: {}", parseEx.getMessage());
+        }
+        return null;
     }
 }

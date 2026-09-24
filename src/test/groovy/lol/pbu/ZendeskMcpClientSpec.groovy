@@ -294,7 +294,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails with an informative error"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         true
     }
 
@@ -306,7 +306,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails mentioning the unrecognized parameter"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         true
     }
 
@@ -318,7 +318,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails requiring isPublic"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         
         true
     }
@@ -343,7 +343,7 @@ class ZendeskMcpClientSpec extends Specification {
         ]))
 
         then: "it fails requiring isPublic"
-        def e = thrown(io.modelcontextprotocol.spec.McpError)
+        thrown(io.modelcontextprotocol.spec.McpError)
         
         true
     }

@@ -42,4 +42,8 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZENDESK_URL: ${{ secrets.ZENDESK_URL }}
+          ZENDESK_CLIENT_ID: ${{ secrets.ZENDESK_CLIENT_ID }}
+          ZENDESK_CLIENT_SECRET: ${{ secrets.ZENDESK_CLIENT_SECRET }}
+          ZENDESK_OAUTH_SCOPE: ${{ secrets.ZENDESK_OAUTH_SCOPE }}
         run: ./gradlew build sonar --info
