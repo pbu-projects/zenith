@@ -60,7 +60,7 @@ class ZenithSpec extends Specification {
 
         then:
         forms != null
-        forms.ticketForms != null
+        forms.ticket_forms != null
 
         when:
         def customObjects = zendeskTools.listCustomObjects()

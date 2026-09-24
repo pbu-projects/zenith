@@ -525,6 +525,9 @@ class ZendeskMcpClientSpec extends Specification {
         !Boolean.TRUE.equals(result.isError())
         result.content() != null
         !result.content().isEmpty()
+        def text = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().first()).text()
+        text.contains('"ticket_forms"')
+        !text.contains('"ticketForms"')
 
         when: "client calls listTicketForms requesting full payload"
         def fullResult = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("listTicketForms", [

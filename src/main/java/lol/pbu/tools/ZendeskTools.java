@@ -49,7 +49,6 @@ public class ZendeskTools {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskTools.class);
     private static final String TICKET_FORMS_KEY = "ticket_forms";
-    private static final String TICKET_FORMS_CAMEL_KEY = "ticketForms";
 
     private final TicketClient ticketClient;
     private final SearchClient searchClient;
@@ -575,7 +574,6 @@ public class ZendeskTools {
         if (response == null || response.getTicketForms() == null) {
             Map<String, Object> empty = new LinkedHashMap<>();
             empty.put(TICKET_FORMS_KEY, Collections.emptyList());
-            empty.put(TICKET_FORMS_CAMEL_KEY, Collections.emptyList());
             return empty;
         }
 
@@ -592,7 +590,6 @@ public class ZendeskTools {
         Map<String, Object> result = new LinkedHashMap<>();
         if (isFull) {
             result.put(TICKET_FORMS_KEY, forms);
-            result.put(TICKET_FORMS_CAMEL_KEY, forms);
             return result;
         }
 
@@ -607,7 +604,6 @@ public class ZendeskTools {
         }).collect(Collectors.toList());
 
         result.put(TICKET_FORMS_KEY, summaries);
-        result.put(TICKET_FORMS_CAMEL_KEY, summaries);
         return result;
     }
 
