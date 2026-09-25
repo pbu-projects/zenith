@@ -27,6 +27,7 @@ import java.util.Optional;
 public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExceptionMapper<HttpClientResponseException> {
 
     private static final Logger log = LoggerFactory.getLogger(HttpClientResponseExceptionMcpErrorMapper.class);
+    private static final String KEY_DESCRIPTION = "description";
 
     private final ObjectMapper objectMapper;
 
@@ -68,13 +69,11 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     private String resolveFallbackDiagnosis(HttpClientResponseException e, int statusCode, String reason) {
         String exMsg = e.getMessage();
         if (exMsg != null && exMsg.contains("The connector returned an error or an invalid response")) {
-            if (statusCode == 422) {
-                return "The upstream Zendesk API rejected the request payload (HTTP 422 Unprocessable Entity). Check that the file extension matches the file content type, the file is not empty, and format is supported.";
-            } else if (statusCode == 400) {
-                return "The upstream Zendesk API rejected the request parameters (HTTP 400 Bad Request).";
-            } else {
-                return "The upstream Zendesk API returned an error (" + statusCode + " " + reason + ").";
-            }
+            return switch (statusCode) {
+                case 422 -> "The upstream Zendesk API rejected the request payload (HTTP 422 Unprocessable Entity). Check that the file extension matches the file content type, the file is not empty, and format is supported.";
+                case 400 -> "The upstream Zendesk API rejected the request parameters (HTTP 400 Bad Request).";
+                default -> "The upstream Zendesk API returned an error (" + statusCode + " " + reason + ").";
+            };
         }
         return (exMsg != null && !exMsg.isBlank()) ? exMsg : "The upstream Zendesk API returned HTTP " + statusCode + " " + reason;
     }
@@ -197,7 +196,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
                 return null;
             }
             Object errorObj = map.get("error");
-            Object descObj = map.get("description");
+            Object descObj = map.get(KEY_DESCRIPTION);
             Object msgObj = map.get("message");
             Object detailsObj = map.get("details");
 
@@ -232,29 +231,32 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     }
 
     private String formatDetails(Object detailsObj) {
-        if (detailsObj instanceof Map<?, ?> detailsMap) {
-            List<String> entries = new ArrayList<>();
-            for (Map.Entry<?, ?> entry : detailsMap.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                Object val = entry.getValue();
-                if (val instanceof List<?> valList) {
-                    List<String> listItems = new ArrayList<>();
-                    for (Object item : valList) {
-                        if (item instanceof Map<?, ?> itemMap && itemMap.containsKey("description")) {
-                            listItems.add(String.valueOf(itemMap.get("description")));
-                        } else {
-                            listItems.add(String.valueOf(item));
-                        }
-                    }
-                    entries.add(key + ": " + String.join(", ", listItems));
-                } else if (val instanceof Map<?, ?> valMap && valMap.containsKey("description")) {
-                    entries.add(key + ": " + valMap.get("description"));
-                } else {
-                    entries.add(key + ": " + val);
-                }
-            }
-            return String.join("; ", entries);
+        if (!(detailsObj instanceof Map<?, ?> detailsMap)) {
+            return detailsObj.toString();
         }
-        return detailsObj.toString();
+        List<String> entries = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : detailsMap.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            entries.add(key + ": " + formatDetailValue(entry.getValue()));
+        }
+        return String.join("; ", entries);
+    }
+
+    private String formatDetailValue(Object val) {
+        if (val instanceof List<?> valList) {
+            List<String> listItems = new ArrayList<>();
+            for (Object item : valList) {
+                listItems.add(extractItemDescription(item));
+            }
+            return String.join(", ", listItems);
+        }
+        return extractItemDescription(val);
+    }
+
+    private String extractItemDescription(Object item) {
+        if (item instanceof Map<?, ?> itemMap && itemMap.containsKey(KEY_DESCRIPTION)) {
+            return String.valueOf(itemMap.get(KEY_DESCRIPTION));
+        }
+        return String.valueOf(item);
     }
 }
