@@ -195,40 +195,49 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             if (rootNode == null || !rootNode.isObject()) {
                 return null;
             }
-            JsonNode errorNode = rootNode.get("error");
-            JsonNode descNode = rootNode.get(KEY_DESCRIPTION);
-            JsonNode msgNode = rootNode.get("message");
-            JsonNode detailsNode = rootNode.get("details");
-
             StringBuilder sb = new StringBuilder();
-            if (errorNode != null && !errorNode.isNull()) {
-                sb.append(errorNode.coerceStringValue());
+            String error = readTextValue(rootNode.get("error"));
+            if (error != null) {
+                sb.append(error);
             }
-            if (descNode != null && !descNode.isNull()) {
-                if (!sb.isEmpty()) {
-                    sb.append(" - ");
-                }
-                sb.append(descNode.coerceStringValue());
-            } else if (msgNode != null && !msgNode.isNull()) {
-                String msgStr = msgNode.coerceStringValue();
-                if (errorNode == null || !msgStr.equals(errorNode.coerceStringValue())) {
-                    if (!sb.isEmpty()) {
-                        sb.append(" - ");
-                    }
-                    sb.append(msgStr);
-                }
-            }
+            appendDiagnosticMessage(sb, error, rootNode.get(KEY_DESCRIPTION), rootNode.get("message"));
+
+            JsonNode detailsNode = rootNode.get("details");
             if (detailsNode != null && !detailsNode.isNull()) {
-                if (!sb.isEmpty()) {
-                    sb.append(": ");
-                }
-                sb.append(formatDetails(detailsNode));
+                appendWithSeparator(sb, ": ", formatDetails(detailsNode));
             }
-            if (!sb.isEmpty()) {
-                return sb.toString();
-            }
+            return !sb.isEmpty() ? sb.toString() : null;
         } catch (Exception parseEx) {
             log.debug("Could not parse Zendesk error response body as JSON: {}", parseEx.getMessage());
+            return null;
+        }
+    }
+
+    private void appendDiagnosticMessage(StringBuilder sb, String error, JsonNode descNode, JsonNode msgNode) {
+        String desc = readTextValue(descNode);
+        if (desc != null) {
+            appendWithSeparator(sb, " - ", desc);
+            return;
+        }
+        String msg = readTextValue(msgNode);
+        if (msg != null && !msg.equals(error)) {
+            appendWithSeparator(sb, " - ", msg);
+        }
+    }
+
+    private void appendWithSeparator(StringBuilder sb, String separator, String text) {
+        if (!sb.isEmpty()) {
+            sb.append(separator);
+        }
+        sb.append(text);
+    }
+
+    private String readTextValue(JsonNode node) {
+        if (node != null && !node.isNull()) {
+            String val = node.coerceStringValue();
+            if (val != null && !val.isBlank()) {
+                return val;
+            }
         }
         return null;
     }
