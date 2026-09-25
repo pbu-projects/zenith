@@ -11,6 +11,9 @@ import jakarta.inject.Singleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -50,7 +53,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
         String diagnosis = extractZendeskErrorMessage(response);
         if (diagnosis == null || diagnosis.isBlank()) {
-            diagnosis = e.getMessage();
+            diagnosis = resolveFallbackDiagnosis(e, statusCode, reason);
         }
 
         String formattedMessage = String.format("Zendesk API error (HTTP %d %s): %s", statusCode, reason, diagnosis);
@@ -60,6 +63,20 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         return McpError.builder(mcpErrorCode)
                 .message(formattedMessage)
                 .build();
+    }
+
+    private String resolveFallbackDiagnosis(HttpClientResponseException e, int statusCode, String reason) {
+        String exMsg = e.getMessage();
+        if (exMsg != null && exMsg.contains("The connector returned an error or an invalid response")) {
+            if (statusCode == 422) {
+                return "The upstream Zendesk API rejected the request payload (HTTP 422 Unprocessable Entity). Check that the file extension matches the file content type, the file is not empty, and format is supported.";
+            } else if (statusCode == 400) {
+                return "The upstream Zendesk API rejected the request parameters (HTTP 400 Bad Request).";
+            } else {
+                return "The upstream Zendesk API returned an error (" + statusCode + " " + reason + ").";
+            }
+        }
+        return (exMsg != null && !exMsg.isBlank()) ? exMsg : "The upstream Zendesk API returned HTTP " + statusCode + " " + reason;
     }
 
     private int resolveStatusCode(HttpResponse<?> response, HttpClientResponseException e) {
@@ -84,7 +101,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
     private int resolveMcpErrorCode(int statusCode) {
         return switch (statusCode) {
-            case 400, 422 -> -32602; // Invalid params
+            case 400, 422, 413 -> -32602; // Invalid params
             case 404 -> -32002;      // Resource Not Found
             default -> -32603;       // Internal / Upstream Error
         };
@@ -132,12 +149,8 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         if (response == null) {
             return null;
         }
-        Optional<String> bodyOpt = response.getBody(String.class);
-        if (bodyOpt.isEmpty()) {
-            return null;
-        }
-        String body = bodyOpt.get().trim();
-        if (body.isEmpty()) {
+        String body = resolveResponseBody(response);
+        if (body == null || body.isEmpty()) {
             return null;
         }
 
@@ -154,6 +167,26 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             return diagnostic.substring(0, 500) + "... [truncated]";
         }
         return diagnostic;
+    }
+
+    private String resolveResponseBody(HttpResponse<?> response) {
+        Optional<String> bodyOpt = response.getBody(String.class);
+        if (bodyOpt.isPresent()) {
+            return bodyOpt.get().trim();
+        }
+        Object rawBody = response.body();
+        if (rawBody instanceof byte[] bytes) {
+            return new String(bytes, StandardCharsets.UTF_8).trim();
+        } else if (rawBody instanceof CharSequence cs) {
+            return cs.toString().trim();
+        } else if (rawBody != null) {
+            try {
+                return objectMapper.writeValueAsString(rawBody).trim();
+            } catch (Exception _) {
+                return rawBody.toString().trim();
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -187,7 +220,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
                 if (!sb.isEmpty()) {
                     sb.append(": ");
                 }
-                sb.append(detailsObj);
+                sb.append(formatDetails(detailsObj));
             }
             if (!sb.isEmpty()) {
                 return sb.toString();
@@ -196,5 +229,32 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             log.debug("Could not parse Zendesk error response body as JSON: {}", parseEx.getMessage());
         }
         return null;
+    }
+
+    private String formatDetails(Object detailsObj) {
+        if (detailsObj instanceof Map<?, ?> detailsMap) {
+            List<String> entries = new ArrayList<>();
+            for (Map.Entry<?, ?> entry : detailsMap.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                Object val = entry.getValue();
+                if (val instanceof List<?> valList) {
+                    List<String> listItems = new ArrayList<>();
+                    for (Object item : valList) {
+                        if (item instanceof Map<?, ?> itemMap && itemMap.containsKey("description")) {
+                            listItems.add(String.valueOf(itemMap.get("description")));
+                        } else {
+                            listItems.add(String.valueOf(item));
+                        }
+                    }
+                    entries.add(key + ": " + String.join(", ", listItems));
+                } else if (val instanceof Map<?, ?> valMap && valMap.containsKey("description")) {
+                    entries.add(key + ": " + valMap.get("description"));
+                } else {
+                    entries.add(key + ": " + val);
+                }
+            }
+            return String.join("; ", entries);
+        }
+        return detailsObj.toString();
     }
 }

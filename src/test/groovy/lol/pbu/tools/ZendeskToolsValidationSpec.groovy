@@ -1083,6 +1083,193 @@ class ZendeskToolsValidationSpec extends Specification {
         resp.results()[1].ticket() != null
         resp.results()[1].ticket().id == 101L
     }
+
+    def "validateAndResolveFilePath rejects null, blank, non-existent, directory, and empty files"() {
+        when: "filePath is null or blank"
+        tools.validateAndResolveFilePath(null)
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("File path must not be null or empty")
+
+        when: "filePath is blank"
+        tools.validateAndResolveFilePath("   ")
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("File path must not be null or empty")
+
+        when: "filePath does not exist"
+        tools.validateAndResolveFilePath("/path/to/definitely/nonexistent/file.txt")
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("File not found at path:")
+
+        when: "filePath is a directory"
+        File tempDir = File.createTempDir("zenith-test-dir-", "")
+        tools.validateAndResolveFilePath(tempDir.absolutePath)
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("Path is a directory, not a regular file:")
+
+        when: "filePath is an empty file (0 bytes)"
+        File emptyFile = File.createTempFile("zenith-empty-", ".txt")
+        tools.validateAndResolveFilePath(emptyFile.absolutePath)
+        then:
+        def e5 = thrown(IllegalArgumentException)
+        e5.message.contains("Cannot upload empty file (0 bytes):")
+
+        cleanup:
+        tempDir?.delete()
+        emptyFile?.delete()
+    }
+
+    def "validateAndResolveFilePath expands user home tilde correctly"() {
+        given: "a temporary file in user home"
+        String userHome = System.getProperty("user.home")
+        File tempInHome = new File(userHome, "zenith-home-test-" + UUID.randomUUID().toString() + ".txt")
+        tempInHome.text = "hello"
+
+        when:
+        def resolved = tools.validateAndResolveFilePath("~/" + tempInHome.name)
+
+        then:
+        resolved != null
+        resolved.toString() == tempInHome.absolutePath
+
+        cleanup:
+        tempInHome?.delete()
+    }
+
+    def "resolveTargetFilename resolves base filename and trims custom filenames"() {
+        given:
+        def p = java.nio.file.Path.of("/tmp/path/to/my-file.txt")
+
+        expect:
+        tools.resolveTargetFilename(p, null) == "my-file.txt"
+        tools.resolveTargetFilename(p, "   ") == "my-file.txt"
+        tools.resolveTargetFilename(p, "custom.png") == "custom.png"
+        tools.resolveTargetFilename(p, "/sub/dir/clean.pdf") == "clean.pdf"
+    }
+
+    def "validateFilenameExtension validates extensions properly"() {
+        when: "valid extensions"
+        tools.validateFilenameExtension("test.txt")
+        tools.validateFilenameExtension("image.png")
+        tools.validateFilenameExtension("my.doc.pdf")
+        then:
+        noExceptionThrown()
+
+        when: "missing extension"
+        tools.validateFilenameExtension("noextension")
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Filename must include a valid file extension")
+
+        when: "trailing dot"
+        tools.validateFilenameExtension("trailingdot.")
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Filename must include a valid file extension")
+
+        when: "dot at start"
+        tools.validateFilenameExtension(".hidden")
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("Filename must include a valid file extension")
+    }
+
+    def "probeContentType detects MIME types by extension with fallback"() {
+        given:
+        def dummyPath = java.nio.file.Path.of("nonexistent-file.unknown")
+
+        expect:
+        tools.probeContentType(dummyPath, "image.png") == "image/png"
+        tools.probeContentType(dummyPath, "data.yaml") == "text/yaml"
+        tools.probeContentType(dummyPath, "config.yml") == "text/yaml"
+        tools.probeContentType(dummyPath, "doc.pdf") == "application/pdf"
+        tools.probeContentType(dummyPath, "log.txt") == "text/plain"
+        tools.probeContentType(dummyPath, "app.log") == "text/plain"
+        tools.probeContentType(dummyPath, "report.csv") == "text/csv"
+        tools.probeContentType(dummyPath, "data.json") == "application/json"
+        tools.probeContentType(dummyPath, "events.jsonl") == "application/json"
+        tools.probeContentType(dummyPath, "notes.md") == "text/markdown"
+        tools.probeContentType(dummyPath, "archive.zip") == "application/zip"
+        tools.probeContentType(dummyPath, "something.unrecognizedextensionxyz") == "application/octet-stream"
+    }
+
+    def "uploadAttachment validates request arguments and calls attachmentClient"() {
+        given:
+        File tempFile = File.createTempFile("zenith-upload-valid-", ".txt")
+        tempFile.text = "Hello upload test content"
+        def mockResp = new lol.pbu.z4j.model.AttachmentUploadResponse().tap {
+            upload = new lol.pbu.z4j.model.AttachmentUploadResponseUpload().tap {
+                token = "mock-upload-token-123"
+            }
+        }
+        attachmentClient.uploadAttachment("custom.txt", "text/plain", _ as byte[]) >> reactor.core.publisher.Mono.just(mockResp)
+
+        when: "calling uploadAttachment with valid file and custom filename"
+        def resp = tools.uploadAttachment(tempFile.absolutePath, "custom.txt")
+
+        then:
+        resp != null
+        resp.upload != null
+        resp.upload.token == "mock-upload-token-123"
+
+        when: "calling uploadAttachment with unrecognized argument"
+        def badReq = new CallToolRequest("uploadAttachment", [filePath: tempFile.absolutePath, bogus: "val"])
+        tools.uploadAttachment(tempFile.absolutePath, null, badReq)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Unrecognized parameter: 'bogus'")
+        e.message.contains("Valid parameters for uploadAttachment are 'filePath' and 'filename'")
+
+        cleanup:
+        tempFile?.delete()
+    }
+
+    def "uploadAttachment propagates HttpClientResponseException directly without wrapping in generic RuntimeException"() {
+        given:
+        File tempFile = File.createTempFile("zenith-upload-fail-", ".png")
+        tempFile.text = "not a real png"
+        def httpResponse = io.micronaut.http.HttpResponse.status(io.micronaut.http.HttpStatus.UNPROCESSABLE_ENTITY)
+                .body('{"error":"RecordInvalid","description":"The file type and file extension do not match."}')
+        def httpEx = new io.micronaut.http.client.exceptions.HttpClientResponseException("Unprocessable Entity", httpResponse)
+        attachmentClient.uploadAttachment(*_) >> reactor.core.publisher.Mono.error(httpEx)
+
+        when:
+        tools.uploadAttachment(tempFile.absolutePath, null)
+
+        then: "HttpClientResponseException is thrown directly so McpErrorMapper can map it"
+        def thrownEx = thrown(io.micronaut.http.client.exceptions.HttpClientResponseException)
+        thrownEx.response.code() == 422
+
+        cleanup:
+        tempFile?.delete()
+    }
+
+    def "resolveUploadTokens successfully uploads files and collects tokens"() {
+        given:
+        File tempFile = File.createTempFile("zenith-token-test-", ".txt")
+        tempFile.text = "Upload token test content"
+        def mockResp = new lol.pbu.z4j.model.AttachmentUploadResponse().tap {
+            upload = new lol.pbu.z4j.model.AttachmentUploadResponseUpload().tap {
+                token = "resolved-token-xyz"
+            }
+        }
+        attachmentClient.uploadAttachment(*_) >> reactor.core.publisher.Mono.just(mockResp)
+
+        when:
+        def tokens = tools.resolveUploadTokens(["existing-token-abc"], [tempFile.absolutePath])
+
+        then:
+        tokens.size() == 2
+        tokens[0] == "existing-token-abc"
+        tokens[1] == "resolved-token-xyz"
+
+        cleanup:
+        tempFile?.delete()
+    }
 }
 
 
