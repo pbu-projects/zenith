@@ -3,6 +3,7 @@ package lol.pbu.tools;
 import io.micronaut.core.annotation.Order;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
+import io.micronaut.json.tree.JsonNode;
 import io.micronaut.mcp.server.exceptions.McpErrorExceptionMapper;
 import io.micronaut.serde.ObjectMapper;
 import io.modelcontextprotocol.spec.McpError;
@@ -188,38 +189,40 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         return null;
     }
 
-    @SuppressWarnings("unchecked")
     private String parseJsonDiagnostic(String body) {
         try {
-            Map<String, Object> map = objectMapper.readValue(body, Map.class);
-            if (map == null) {
+            JsonNode rootNode = objectMapper.readValue(body, JsonNode.class);
+            if (rootNode == null || !rootNode.isObject()) {
                 return null;
             }
-            Object errorObj = map.get("error");
-            Object descObj = map.get(KEY_DESCRIPTION);
-            Object msgObj = map.get("message");
-            Object detailsObj = map.get("details");
+            JsonNode errorNode = rootNode.get("error");
+            JsonNode descNode = rootNode.get(KEY_DESCRIPTION);
+            JsonNode msgNode = rootNode.get("message");
+            JsonNode detailsNode = rootNode.get("details");
 
             StringBuilder sb = new StringBuilder();
-            if (errorObj != null) {
-                sb.append(errorObj);
+            if (errorNode != null && !errorNode.isNull()) {
+                sb.append(errorNode.coerceStringValue());
             }
-            if (descObj != null) {
+            if (descNode != null && !descNode.isNull()) {
                 if (!sb.isEmpty()) {
                     sb.append(" - ");
                 }
-                sb.append(descObj);
-            } else if (msgObj != null && !msgObj.equals(errorObj)) {
-                if (!sb.isEmpty()) {
-                    sb.append(" - ");
+                sb.append(descNode.coerceStringValue());
+            } else if (msgNode != null && !msgNode.isNull()) {
+                String msgStr = msgNode.coerceStringValue();
+                if (errorNode == null || !msgStr.equals(errorNode.coerceStringValue())) {
+                    if (!sb.isEmpty()) {
+                        sb.append(" - ");
+                    }
+                    sb.append(msgStr);
                 }
-                sb.append(msgObj);
             }
-            if (detailsObj != null) {
+            if (detailsNode != null && !detailsNode.isNull()) {
                 if (!sb.isEmpty()) {
                     sb.append(": ");
                 }
-                sb.append(formatDetails(detailsObj));
+                sb.append(formatDetails(detailsNode));
             }
             if (!sb.isEmpty()) {
                 return sb.toString();
@@ -230,22 +233,22 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         return null;
     }
 
-    private String formatDetails(Object detailsObj) {
-        if (!(detailsObj instanceof Map<?, ?> detailsMap)) {
-            return detailsObj.toString();
+    private String formatDetails(JsonNode detailsNode) {
+        if (!detailsNode.isObject()) {
+            return detailsNode.coerceStringValue();
         }
         List<String> entries = new ArrayList<>();
-        for (Map.Entry<?, ?> entry : detailsMap.entrySet()) {
-            String key = String.valueOf(entry.getKey());
+        for (Map.Entry<String, JsonNode> entry : detailsNode.entries()) {
+            String key = entry.getKey();
             entries.add(key + ": " + formatDetailValue(entry.getValue()));
         }
         return String.join("; ", entries);
     }
 
-    private String formatDetailValue(Object val) {
-        if (val instanceof List<?> valList) {
+    private String formatDetailValue(JsonNode val) {
+        if (val.isArray()) {
             List<String> listItems = new ArrayList<>();
-            for (Object item : valList) {
+            for (JsonNode item : val.values()) {
                 listItems.add(extractItemDescription(item));
             }
             return String.join(", ", listItems);
@@ -253,10 +256,13 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         return extractItemDescription(val);
     }
 
-    private String extractItemDescription(Object item) {
-        if (item instanceof Map<?, ?> itemMap && itemMap.containsKey(KEY_DESCRIPTION)) {
-            return String.valueOf(itemMap.get(KEY_DESCRIPTION));
+    private String extractItemDescription(JsonNode item) {
+        if (item != null && item.isObject()) {
+            JsonNode desc = item.get(KEY_DESCRIPTION);
+            if (desc != null && !desc.isNull()) {
+                return desc.coerceStringValue();
+            }
         }
-        return String.valueOf(item);
+        return item != null ? item.coerceStringValue() : "";
     }
 }
