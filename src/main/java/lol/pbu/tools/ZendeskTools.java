@@ -49,6 +49,7 @@ public class ZendeskTools {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskTools.class);
     private static final String TICKET_FORMS_KEY = "ticket_forms";
+    private static final String TYPE_INCIDENT = "incident";
 
     private final TicketClient ticketClient;
     private final SearchClient searchClient;
@@ -356,7 +357,7 @@ public class ZendeskTools {
     private TicketUpdateInputType parseTicketType(String type) {
         if (type != null) {
             String normalized = type.trim().toLowerCase();
-            if ("problem".equals(normalized) || "incident".equals(normalized) || "question".equals(normalized) || "task".equals(normalized)) {
+            if ("problem".equals(normalized) || TYPE_INCIDENT.equals(normalized) || "question".equals(normalized) || "task".equals(normalized)) {
                 return TicketUpdateInputType.fromValue(normalized);
             }
         }
@@ -476,6 +477,16 @@ public class ZendeskTools {
         return input;
     }
 
+    private void validateProblemTypeConflict(Long problemId, String type) {
+        if (problemId != null && type != null && !TYPE_INCIDENT.equalsIgnoreCase(type.trim())) {
+            throw new IllegalArgumentException("Cannot specify type '" + type + "' when linking to a problem ticket. Linked tickets must be of type 'incident'.");
+        }
+    }
+
+    private static boolean isTypeUnset(String type) {
+        return type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
+    }
+
     private void validateProblemTarget(Long problemId) {
         if (problemId == null) return;
         if (problemId <= 0) {
@@ -533,16 +544,12 @@ public class ZendeskTools {
         log.info("MCP Tool called: updateTicket(id={})", ticketId);
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
         validateKnownParameters(request, "updateTicket", "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields", "requesterId", "type");
-        if (problemId != null && type != null) {
-            if (!type.trim().equalsIgnoreCase("incident")) {
-                throw new IllegalArgumentException("Cannot specify type '" + type + "' when linking to a problem ticket. Linked tickets must be of type 'incident'.");
-            }
-        }
+        validateProblemTypeConflict(problemId, type);
         validateProblemTarget(problemId);
         List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
         TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
 
-        final boolean isTypeUnset = type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
+        final boolean isTypeUnset = isTypeUnset(type);
         final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
 
         if (problemId != null || type != null) {
@@ -658,15 +665,10 @@ public class ZendeskTools {
 
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
 
-        if (problemId != null && type != null) {
-            if (!type.trim().equalsIgnoreCase("incident")) {
-                throw new IllegalArgumentException("Cannot specify type '" + type + "' when linking to a problem ticket. Linked tickets must be of type 'incident'.");
-            }
-        }
-
+        validateProblemTypeConflict(problemId, type);
         validateProblemTarget(problemId);
 
-        final boolean isTypeUnset = type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
+        final boolean isTypeUnset = isTypeUnset(type);
         final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
         List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
 
