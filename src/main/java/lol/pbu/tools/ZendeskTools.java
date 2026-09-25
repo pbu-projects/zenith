@@ -27,6 +27,8 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -222,21 +224,9 @@ public class ZendeskTools {
         if (attachmentFilePaths != null) {
             for (String filePath : attachmentFilePaths) {
                 if (StringUtils.isNotEmpty(filePath)) {
-                    try {
-                        Path path = Path.of(filePath);
-                        byte[] bytes = Files.readAllBytes(path);
-                        String contentType = Files.probeContentType(path);
-                        if (contentType == null) {
-                            contentType = "application/octet-stream";
-                        }
-                        String filename = path.getFileName().toString();
-                        AttachmentUploadResponse uploadResp = attachmentClient.uploadAttachment(filename, contentType, bytes).block();
-                        if (uploadResp != null && uploadResp.getUpload() != null && uploadResp.getUpload().getToken() != null) {
-                            tokens.add(uploadResp.getUpload().getToken());
-                        }
-                    } catch (Exception e) {
-                        log.error("Failed to upload attachment from {}: {}", filePath, e.getMessage(), e);
-                        throw new RuntimeException("Failed to upload attachment from " + filePath + ": " + e.getMessage(), e);
+                    AttachmentUploadResponse uploadResp = uploadAttachment(filePath, null);
+                    if (uploadResp != null && uploadResp.getUpload() != null && uploadResp.getUpload().getToken() != null) {
+                        tokens.add(uploadResp.getUpload().getToken());
                     }
                 }
             }
@@ -372,9 +362,14 @@ public class ZendeskTools {
         }
         for (String key : request.arguments().keySet()) {
             if (!known.contains(key)) {
-                String hint = "createTicket".equals(toolName)
-                        ? "If you meant to set a custom field, use the 'customFields' array parameter."
-                        : "If you meant to update a custom field, use the 'customFields' array parameter.";
+                String hint;
+                if ("uploadAttachment".equals(toolName)) {
+                    hint = "Valid parameters for uploadAttachment are 'filePath' and 'filename'.";
+                } else if ("createTicket".equals(toolName)) {
+                    hint = "If you meant to set a custom field, use the 'customFields' array parameter.";
+                } else {
+                    hint = "If you meant to update a custom field, use the 'customFields' array parameter.";
+                }
                 throw new IllegalArgumentException("Unrecognized parameter: '" + key + "'. " + hint);
             }
         }
@@ -599,25 +594,126 @@ public class ZendeskTools {
     ) {
         return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null);
     }
+    static final Map<String, String> EXTENSION_MIME_TYPES = Map.ofEntries(
+            Map.entry("txt", "text/plain"),
+            Map.entry("log", "text/plain"),
+            Map.entry("csv", "text/csv"),
+            Map.entry("json", "application/json"),
+            Map.entry("jsonl", "application/json"),
+            Map.entry("yaml", "text/yaml"),
+            Map.entry("yml", "text/yaml"),
+            Map.entry("md", "text/markdown"),
+            Map.entry("png", "image/png"),
+            Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"),
+            Map.entry("gif", "image/gif"),
+            Map.entry("pdf", "application/pdf"),
+            Map.entry("zip", "application/zip"),
+            Map.entry("xml", "application/xml"),
+            Map.entry("html", "text/html"),
+            Map.entry("htm", "text/html"),
+            Map.entry("svg", "image/svg+xml")
+    );
+
+    Path validateAndResolveFilePath(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            throw new IllegalArgumentException("File path must not be null or empty");
+        }
+        String expanded = filePath.trim();
+        if (expanded.equals("~")) {
+            expanded = System.getProperty("user.home");
+        } else if (expanded.startsWith("~" + File.separator) || expanded.startsWith("~/")) {
+            expanded = System.getProperty("user.home") + expanded.substring(1);
+        }
+        Path path = Path.of(expanded).toAbsolutePath().normalize();
+        if (!Files.exists(path)) {
+            throw new IllegalArgumentException("File not found at path: " + filePath);
+        }
+        if (Files.isDirectory(path)) {
+            throw new IllegalArgumentException("Path is a directory, not a regular file: " + filePath);
+        }
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("Path is not a regular file: " + filePath);
+        }
+        if (!Files.isReadable(path)) {
+            throw new IllegalArgumentException("File is not readable (check permissions): " + filePath);
+        }
+        try {
+            if (Files.size(path) == 0) {
+                throw new IllegalArgumentException("Cannot upload empty file (0 bytes): " + filePath);
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to check file size for " + filePath + ": " + e.getMessage(), e);
+        }
+        return path;
+    }
+
+    String resolveTargetFilename(Path path, @Nullable String filename) {
+        if (filename != null && !filename.isBlank()) {
+            String trimmed = filename.trim();
+            Path fnPath = Path.of(trimmed).getFileName();
+            return fnPath != null ? fnPath.toString() : trimmed;
+        }
+        Path fileNamePath = path.getFileName();
+        return fileNamePath != null ? fileNamePath.toString() : "attachment.bin";
+    }
+
+    void validateFilenameExtension(String filename) {
+        int lastDot = filename.lastIndexOf('.');
+        if (lastDot <= 0 || lastDot == filename.length() - 1) {
+            throw new IllegalArgumentException(
+                    "Filename must include a valid file extension (e.g. .png, .txt, .pdf): " + filename);
+        }
+    }
+
+    String probeContentType(Path path, String targetFilename) {
+        try {
+            String probed = Files.probeContentType(path);
+            if (probed != null && !probed.isBlank()) {
+                return probed;
+            }
+        } catch (IOException _) {
+            // Fall back to extension-based lookup
+        }
+        int lastDot = targetFilename.lastIndexOf('.');
+        if (lastDot > 0 && lastDot < targetFilename.length() - 1) {
+            String ext = targetFilename.substring(lastDot + 1).toLowerCase();
+            String mime = EXTENSION_MIME_TYPES.get(ext);
+            if (mime != null) {
+                return mime;
+            }
+        }
+        return "application/octet-stream";
+    }
+
     @Tool(description = "Upload a file from the local file system to Zendesk to obtain an upload token for use in createTicket, updateTicket, or batchUpdateTickets")
     public AttachmentUploadResponse uploadAttachment(
             @ToolArg(description = "The absolute path to the local file to upload") String filePath,
-            @ToolArg(description = "Optional filename to use for the attachment. If not provided, the local filename is used.") @Nullable String filename
+            @ToolArg(description = "Optional filename to use for the attachment. If not provided, the local filename is used.") @Nullable String filename,
+            @Nullable CallToolRequest request
     ) {
-        log.info("MCP Tool called: uploadAttachment(filePath='{}')", filePath);
+        log.info("MCP Tool called: uploadAttachment(filePath='{}', filename='{}')", filePath, filename);
+        validateKnownParameters(request, "uploadAttachment", "filePath", "filename");
+        Path path = validateAndResolveFilePath(filePath);
+        String targetFilename = resolveTargetFilename(path, filename);
+        validateFilenameExtension(targetFilename);
+
+        byte[] bytes;
         try {
-            Path path = Path.of(filePath);
-            byte[] bytes = Files.readAllBytes(path);
-            String contentType = Files.probeContentType(path);
-            if (contentType == null) {
-                contentType = "application/octet-stream";
-            }
-            String targetFilename = StringUtils.isNotEmpty(filename) ? filename : path.getFileName().toString();
-            return attachmentClient.uploadAttachment(targetFilename, contentType, bytes).block();
-        } catch (Exception e) {
-            log.error("Failed to upload attachment from {}: {}", filePath, e.getMessage(), e);
-            throw new RuntimeException("Failed to upload attachment: " + e.getMessage(), e);
+            bytes = Files.readAllBytes(path);
+        } catch (IOException e) {
+            log.error("Failed to read file from {}: {}", filePath, e.getMessage(), e);
+            throw new IllegalArgumentException("Failed to read file at " + filePath + ": " + e.getMessage(), e);
         }
+
+        String contentType = probeContentType(path, targetFilename);
+        log.debug("Uploading attachment: filename='{}', contentType='{}', size={} bytes", targetFilename, contentType, bytes.length);
+
+        return attachmentClient.uploadAttachment(targetFilename, contentType, bytes).block();
+    }
+
+    public AttachmentUploadResponse uploadAttachment(String filePath, @Nullable String filename) {
+        return uploadAttachment(filePath, filename, null);
     }
 
 

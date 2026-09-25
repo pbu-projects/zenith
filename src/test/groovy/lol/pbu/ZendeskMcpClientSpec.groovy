@@ -5,6 +5,7 @@ import io.modelcontextprotocol.client.McpClient
 import io.modelcontextprotocol.client.McpSyncClient
 import io.modelcontextprotocol.client.transport.ServerParameters
 import io.modelcontextprotocol.client.transport.StdioClientTransport
+import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
 import spock.lang.Shared
 import spock.lang.Specification
@@ -245,6 +246,36 @@ class ZendeskMcpClientSpec extends Specification {
         !Boolean.TRUE.equals(result.isError())
         result.content() != null
         !result.content().isEmpty()
+
+        cleanup:
+        tempFile?.delete()
+    }
+
+    def "9b. MCP Client invokes uploadAttachment tool with invalid file path over STDIO protocol"() {
+        when: "client calls uploadAttachment tool with non-existent path"
+        mcpClient.callTool(new McpSchema.CallToolRequest("uploadAttachment", [
+                filePath: "/nonexistent/path/never_existed_file.txt"
+        ]))
+
+        then: "it fails with actionable file not found error"
+        def e = thrown(McpError)
+        e.message.contains("File not found at path:")
+    }
+
+    def "9c. MCP Client invokes uploadAttachment tool with missing file extension over STDIO protocol"() {
+        given: "a temporary file without extension"
+        File tempFile = File.createTempFile("mcp-noext-", "")
+        tempFile.text = "test"
+
+        when: "client calls uploadAttachment tool without valid extension"
+        mcpClient.callTool(new McpSchema.CallToolRequest("uploadAttachment", [
+                filePath: tempFile.absolutePath,
+                filename: "noextensionfile"
+        ]))
+
+        then: "it fails requiring valid file extension"
+        def e = thrown(McpError)
+        e.message.contains("Filename must include a valid file extension")
 
         cleanup:
         tempFile?.delete()

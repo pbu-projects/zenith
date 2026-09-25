@@ -36,4 +36,40 @@ class DefaultThrowableMcpErrorMapperSpec extends Specification {
         error.jsonRpcError.code == -32603
         error.message == "NullPointerException"
     }
+
+    def "unwraps causal chain and delegates to HttpClientResponseExceptionMcpErrorMapper"() {
+        given:
+        def objectMapper = io.micronaut.serde.ObjectMapper.getDefault()
+        def httpMapper = new HttpClientResponseExceptionMcpErrorMapper(objectMapper)
+        def mapperWithDelegates = new DefaultThrowableMcpErrorMapper(httpMapper, null)
+
+        def response = io.micronaut.http.HttpResponse.status(io.micronaut.http.HttpStatus.UNPROCESSABLE_ENTITY)
+                .body('{"error":"RecordInvalid","description":"Validation failed"}')
+        def httpEx = new io.micronaut.http.client.exceptions.HttpClientResponseException("Unprocessable", response)
+        def wrappedEx = new RuntimeException("Outer wrapper", new IllegalStateException("Middle wrapper", httpEx))
+
+        when:
+        def error = mapperWithDelegates.map(wrappedEx)
+
+        then:
+        error.jsonRpcError.code == -32602
+        error.message.contains("Zendesk API error (HTTP 422 Unprocessable Entity)")
+        error.message.contains("RecordInvalid - Validation failed")
+    }
+
+    def "unwraps causal chain and delegates to IllegalArgumentExceptionMcpErrorMapper"() {
+        given:
+        def argMapper = new IllegalArgumentExceptionMcpErrorMapper()
+        def mapperWithDelegates = new DefaultThrowableMcpErrorMapper(null, argMapper)
+
+        def argEx = new IllegalArgumentException("File not found at path: /invalid/path.txt")
+        def wrappedEx = new RuntimeException("Upload failed", argEx)
+
+        when:
+        def error = mapperWithDelegates.map(wrappedEx)
+
+        then:
+        error.jsonRpcError.code == -32602
+        error.message == "File not found at path: /invalid/path.txt"
+    }
 }
