@@ -27,6 +27,10 @@ class ZendeskMcpClientSpec extends Specification {
     @Shared
     String binaryPath
 
+    @Shared
+    @spock.lang.TempDir
+    java.nio.file.Path tempDir
+
     def setupSpec() {
         def isWindows = System.getProperty("os.name", "").toLowerCase().contains("win")
         binaryPath = Paths.get(isWindows ? "build/install/zenith/bin/zenith.bat" : "build/install/zenith/bin/zenith").toAbsolutePath().toString()
@@ -232,7 +236,7 @@ class ZendeskMcpClientSpec extends Specification {
 
     def "9. MCP Client invokes uploadAttachment tool over STDIO protocol"() {
         given: "a temporary file on disk"
-        File tempFile = File.createTempFile("mcp-upload-", ".txt")
+        File tempFile = tempDir.resolve("mcp-upload.txt").toFile()
         tempFile.text = "MCP client attachment upload test"
 
         when: "client calls uploadAttachment tool"
@@ -246,9 +250,6 @@ class ZendeskMcpClientSpec extends Specification {
         !Boolean.TRUE.equals(result.isError())
         result.content() != null
         !result.content().isEmpty()
-
-        cleanup:
-        tempFile?.delete()
     }
 
     def "9b. MCP Client invokes uploadAttachment tool with invalid file path over STDIO protocol"() {
@@ -264,7 +265,7 @@ class ZendeskMcpClientSpec extends Specification {
 
     def "9c. MCP Client invokes uploadAttachment tool with missing file extension over STDIO protocol"() {
         given: "a temporary file without extension"
-        File tempFile = File.createTempFile("mcp-noext-", "")
+        File tempFile = tempDir.resolve("mcp-noext").toFile()
         tempFile.text = "test"
 
         when: "client calls uploadAttachment tool without valid extension"
@@ -276,9 +277,6 @@ class ZendeskMcpClientSpec extends Specification {
         then: "it fails requiring valid file extension"
         def e = thrown(McpError)
         e.message.contains("Filename must include a valid file extension")
-
-        cleanup:
-        tempFile?.delete()
     }
 
     def "10. MCP Client invokes batchUpdateTickets tool over STDIO protocol"() {

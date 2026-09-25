@@ -27,8 +27,13 @@ import lol.pbu.z4j.model.TicketUpdateInputType
 import lol.pbu.z4j.model.TicketUpdateRequest
 import lol.pbu.z4j.model.TicketUpdateResponse
 import spock.lang.Specification
+import spock.lang.TempDir
+import java.nio.file.Path
 
 class ZendeskToolsValidationSpec extends Specification {
+
+    @TempDir
+    Path tempDir
 
     TicketClient ticketClient = Mock()
     SearchClient searchClient = Mock()
@@ -1104,39 +1109,55 @@ class ZendeskToolsValidationSpec extends Specification {
         e3.message.contains("File not found at path:")
 
         when: "filePath is a directory"
-        File tempDir = File.createTempDir("zenith-test-dir-", "")
-        tools.validateAndResolveFilePath(tempDir.absolutePath)
+        File testDir = tempDir.resolve("zenith-test-dir").toFile()
+        testDir.mkdirs()
+        tools.validateAndResolveFilePath(testDir.absolutePath)
         then:
         def e4 = thrown(IllegalArgumentException)
         e4.message.contains("Path is a directory, not a regular file:")
 
         when: "filePath is an empty file (0 bytes)"
-        File emptyFile = File.createTempFile("zenith-empty-", ".txt")
+        File emptyFile = tempDir.resolve("zenith-empty.txt").toFile()
+        emptyFile.createNewFile()
         tools.validateAndResolveFilePath(emptyFile.absolutePath)
         then:
         def e5 = thrown(IllegalArgumentException)
         e5.message.contains("Cannot upload empty file (0 bytes):")
+    }
 
-        cleanup:
-        tempDir?.delete()
-        emptyFile?.delete()
+    def "validateAndResolveFilePath rejects files exceeding maximum 50MB limit"() {
+        given: "a sparse file over 50MB"
+        File bigFile = tempDir.resolve("too-large.bin").toFile()
+        new RandomAccessFile(bigFile, "rw").withCloseable { raf ->
+            raf.setLength(50L * 1024 * 1024 + 1024)
+        }
+
+        when:
+        tools.validateAndResolveFilePath(bigFile.absolutePath)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("File size exceeds maximum upload limit of 50MB")
     }
 
     def "validateAndResolveFilePath expands user home tilde correctly"() {
-        given: "a temporary file in user home"
-        String userHome = System.getProperty("user.home")
-        File tempInHome = new File(userHome, "zenith-home-test-" + UUID.randomUUID().toString() + ".txt")
+        given: "a temporary directory acting as user home"
+        String originalHome = System.getProperty("user.home")
+        File fakeHome = tempDir.resolve("fake-home").toFile()
+        fakeHome.mkdirs()
+        System.setProperty("user.home", fakeHome.absolutePath)
+        File tempInHome = new File(fakeHome, "zenith-home-test.txt")
         tempInHome.text = "hello"
 
         when:
-        def resolved = tools.validateAndResolveFilePath("~/" + tempInHome.name)
+        def resolved = tools.validateAndResolveFilePath("~/zenith-home-test.txt")
 
         then:
         resolved != null
         resolved.toString() == tempInHome.absolutePath
 
         cleanup:
-        tempInHome?.delete()
+        System.setProperty("user.home", originalHome)
     }
 
     def "resolveTargetFilename resolves base filename and trims custom filenames"() {
@@ -1198,7 +1219,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "uploadAttachment validates request arguments and calls attachmentClient"() {
         given:
-        File tempFile = File.createTempFile("zenith-upload-valid-", ".txt")
+        File tempFile = tempDir.resolve("zenith-upload-valid.txt").toFile()
         tempFile.text = "Hello upload test content"
         def mockResp = new lol.pbu.z4j.model.AttachmentUploadResponse().tap {
             upload = new lol.pbu.z4j.model.AttachmentUploadResponseUpload().tap {
@@ -1223,14 +1244,11 @@ class ZendeskToolsValidationSpec extends Specification {
         def e = thrown(IllegalArgumentException)
         e.message.contains("Unrecognized parameter: 'bogus'")
         e.message.contains("Valid parameters for uploadAttachment are 'filePath' and 'filename'")
-
-        cleanup:
-        tempFile?.delete()
     }
 
     def "uploadAttachment propagates HttpClientResponseException directly without wrapping in generic RuntimeException"() {
         given:
-        File tempFile = File.createTempFile("zenith-upload-fail-", ".png")
+        File tempFile = tempDir.resolve("zenith-upload-fail.png").toFile()
         tempFile.text = "not a real png"
         def httpResponse = io.micronaut.http.HttpResponse.status(io.micronaut.http.HttpStatus.UNPROCESSABLE_ENTITY)
                 .body('{"error":"RecordInvalid","description":"The file type and file extension do not match."}')
@@ -1243,14 +1261,11 @@ class ZendeskToolsValidationSpec extends Specification {
         then: "HttpClientResponseException is thrown directly so McpErrorMapper can map it"
         def thrownEx = thrown(io.micronaut.http.client.exceptions.HttpClientResponseException)
         thrownEx.response.code() == 422
-
-        cleanup:
-        tempFile?.delete()
     }
 
     def "resolveUploadTokens successfully uploads files and collects tokens"() {
         given:
-        File tempFile = File.createTempFile("zenith-token-test-", ".txt")
+        File tempFile = tempDir.resolve("zenith-token-test.txt").toFile()
         tempFile.text = "Upload token test content"
         def mockResp = new lol.pbu.z4j.model.AttachmentUploadResponse().tap {
             upload = new lol.pbu.z4j.model.AttachmentUploadResponseUpload().tap {
@@ -1266,9 +1281,6 @@ class ZendeskToolsValidationSpec extends Specification {
         tokens.size() == 2
         tokens[0] == "existing-token-abc"
         tokens[1] == "resolved-token-xyz"
-
-        cleanup:
-        tempFile?.delete()
     }
 }
 

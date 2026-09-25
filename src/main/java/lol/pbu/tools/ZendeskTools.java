@@ -2,6 +2,7 @@ package lol.pbu.tools;
 
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.util.StringUtils;
+import io.micronaut.http.MediaType;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
 import jakarta.inject.Singleton;
@@ -38,6 +39,7 @@ import java.util.Set;
 import java.util.Map;
 import java.util.HashSet;
 import java.util.Arrays;
+import java.util.Optional;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import lol.pbu.z4j.model.TicketCustomField;
 import java.util.LinkedHashMap;
@@ -594,6 +596,8 @@ public class ZendeskTools {
     ) {
         return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null);
     }
+    public static final long MAX_ATTACHMENT_SIZE_BYTES = 50L * 1024 * 1024; // 50MB
+
     static final Map<String, String> EXTENSION_MIME_TYPES = Map.ofEntries(
             Map.entry("txt", "text/plain"),
             Map.entry("log", "text/plain"),
@@ -639,8 +643,12 @@ public class ZendeskTools {
             throw new IllegalArgumentException("File is not readable (check permissions): " + filePath);
         }
         try {
-            if (Files.size(path) == 0) {
+            long size = Files.size(path);
+            if (size == 0) {
                 throw new IllegalArgumentException("Cannot upload empty file (0 bytes): " + filePath);
+            }
+            if (size > MAX_ATTACHMENT_SIZE_BYTES) {
+                throw new IllegalArgumentException("File size exceeds maximum upload limit of 50MB (" + size + " bytes): " + filePath);
             }
         } catch (IOException e) {
             throw new IllegalArgumentException("Failed to check file size for " + filePath + ": " + e.getMessage(), e);
@@ -673,17 +681,21 @@ public class ZendeskTools {
                 return probed;
             }
         } catch (IOException _) {
-            // Fall back to extension-based lookup
+            // Fall back to framework and extension-based lookup
         }
         int lastDot = targetFilename.lastIndexOf('.');
         if (lastDot > 0 && lastDot < targetFilename.length() - 1) {
             String ext = targetFilename.substring(lastDot + 1).toLowerCase();
+            Optional<MediaType> mediaType = MediaType.forExtension(ext);
+            if (mediaType.isPresent()) {
+                return mediaType.get().getName();
+            }
             String mime = EXTENSION_MIME_TYPES.get(ext);
             if (mime != null) {
                 return mime;
             }
         }
-        return "application/octet-stream";
+        return MediaType.APPLICATION_OCTET_STREAM;
     }
 
     @Tool(description = "Upload a file from the local file system to Zendesk to obtain an upload token for use in createTicket, updateTicket, or batchUpdateTickets")
