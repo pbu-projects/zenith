@@ -235,7 +235,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     private String readTextValue(JsonNode node) {
         if (node != null && !node.isNull()) {
             String val = node.coerceStringValue();
-            if (val != null && !val.isBlank()) {
+            if (!val.isBlank()) {
                 return val;
             }
         }
