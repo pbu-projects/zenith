@@ -6,8 +6,14 @@ import io.micronaut.http.MediaType;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
 import jakarta.inject.Singleton;
+import lol.pbu.client.CustomStatusClient;
 import lol.pbu.model.BatchUpdateResponse;
 import lol.pbu.model.BatchUpdateResponse.TicketUpdateResult;
+import lol.pbu.model.CustomStatusesResponse;
+import lol.pbu.model.CustomStatusResponse;
+import lol.pbu.model.TicketFormStatus;
+import lol.pbu.model.TicketFormStatusesResponse;
+import lol.pbu.model.TicketUpdateInputWithForm;
 import lol.pbu.z4j.client.ArticleClient;
 import lol.pbu.z4j.client.AttachmentClient;
 import lol.pbu.z4j.client.CategoryClient;
@@ -68,6 +74,17 @@ public class ZendeskTools {
     private final TranslationClient translationClient;
     private final TopicClient topicClient;
     private final PostClient postClient;
+    private final CustomStatusClient customStatusClient;
+
+    public static final long CUSTOM_STATUS_CACHE_TTL_MS = 5 * 60 * 1000L; // 5 minutes
+    private volatile List<TicketFieldCustomStatusObject> cachedCustomStatuses;
+    private volatile long customStatusCacheExpiresAtMs = 0L;
+    private volatile List<TicketFormStatus> cachedTicketFormStatuses;
+    private volatile long ticketFormStatusCacheExpiresAtMs = 0L;
+
+    public static final long TICKET_FORM_CACHE_TTL_MS = 5 * 60 * 1000L; // 5 minutes
+    private volatile List<TicketForm> cachedTicketForms;
+    private volatile long ticketFormCacheExpiresAtMs = 0L;
 
     public ZendeskTools(
             TicketClient ticketClient,
@@ -84,6 +101,26 @@ public class ZendeskTools {
             TopicClient topicClient,
             PostClient postClient
     ) {
+        this(ticketClient, searchClient, ticketFormsClient, customObjectsClient, customObjectRecordsClient, attachmentClient, jobStatusClient, viewClient, articleClient, categoryClient, translationClient, topicClient, postClient, null);
+    }
+
+    @jakarta.inject.Inject
+    public ZendeskTools(
+            TicketClient ticketClient,
+            SearchClient searchClient,
+            TicketFormsClient ticketFormsClient,
+            CustomObjectsClient customObjectsClient,
+            CustomObjectRecordsClient customObjectRecordsClient,
+            AttachmentClient attachmentClient,
+            JobStatusClient jobStatusClient,
+            ViewClient viewClient,
+            ArticleClient articleClient,
+            CategoryClient categoryClient,
+            TranslationClient translationClient,
+            TopicClient topicClient,
+            PostClient postClient,
+            @Nullable CustomStatusClient customStatusClient
+    ) {
         this.ticketClient = ticketClient;
         this.searchClient = searchClient;
         this.ticketFormsClient = ticketFormsClient;
@@ -97,6 +134,7 @@ public class ZendeskTools {
         this.translationClient = translationClient;
         this.topicClient = topicClient;
         this.postClient = postClient;
+        this.customStatusClient = customStatusClient;
     }
 
     @Tool(description = "Get details of a specific Zendesk ticket by its numeric ID")
@@ -248,10 +286,12 @@ public class ZendeskTools {
             @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
             @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
             @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
+            @ToolArg(description = "Optional numeric ID of a custom ticket status (from listCustomStatuses)") @Nullable Long customStatusId,
+            @ToolArg(description = "Optional numeric ticket form ID to specify the form used for this ticket") @Nullable Long ticketFormId,
             CallToolRequest request
     ) {
         log.info("MCP Tool called: createTicket(subject='{}')", subject);
-        validateKnownParameters(request, "createTicket", "subject", "comment", "isPublic", "priority", "status", "uploadTokens", "attachmentFilePaths", "customFields", "requesterId", "type", "description");
+        validateKnownParameters(request, "createTicket", "subject", "comment", "isPublic", "priority", "status", "uploadTokens", "attachmentFilePaths", "customFields", "requesterId", "type", "description", "customStatusId", "custom_status_id", "ticketFormId", "ticket_form_id");
 
         String initialComment = comment;
         if (request != null && request.arguments() != null && request.arguments().containsKey("description")) {
@@ -316,8 +356,43 @@ public class ZendeskTools {
             }
         }
 
+        final Long resolvedTicketFormId = resolveTicketFormId(ticketFormId, request);
+        if (resolvedTicketFormId != null) {
+            validateTicketFormBounds(resolvedTicketFormId);
+            validateTicketForm(resolvedTicketFormId);
+            input.setTicketFormId(resolvedTicketFormId);
+        }
+
+        final Long resolvedCustomStatusId = resolveCustomStatusId(customStatusId, request);
+        if (resolvedCustomStatusId != null) {
+            validateCustomStatusBounds(resolvedCustomStatusId);
+            TicketFieldCustomStatusObject validated = validateCustomStatus(resolvedCustomStatusId, StringUtils.isNotEmpty(status) ? status : "new");
+            if (resolvedTicketFormId != null && validated != null) {
+                validateCustomStatusForForm(validated, resolvedTicketFormId);
+            }
+            input.setCustomStatusId(resolvedCustomStatusId.intValue());
+        }
+
         return ticketClient.createTicket(new TicketCreateRequest(input)).block();
     }
+
+    public TicketResponse createTicket(
+            String subject,
+            @Nullable String comment,
+            Boolean isPublic,
+            @Nullable String priority,
+            @Nullable String status,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            CallToolRequest request
+    ) {
+        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, customStatusId, null, request);
+    }
+
 
     public TicketResponse createTicket(
             String subject,
@@ -328,7 +403,7 @@ public class ZendeskTools {
             List<String> uploadTokens,
             List<String> attachmentFilePaths
     ) {
-        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, null, null, null, null);
+        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, null, null, null, null, (CallToolRequest) null);
     }
 
     public TicketResponse createTicket(
@@ -343,7 +418,347 @@ public class ZendeskTools {
             Long requesterId,
             String type
     ) {
-        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, null);
+        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, null, (CallToolRequest) null);
+    }
+
+    public TicketResponse createTicket(
+            String subject,
+            String comment,
+            Boolean isPublic,
+            String priority,
+            String status,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type,
+            CallToolRequest request
+    ) {
+        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, null, request);
+    }
+
+    private Long resolveCustomStatusId(Long customStatusId, @Nullable CallToolRequest request) {
+        if (customStatusId != null) {
+            return customStatusId;
+        }
+        if (request != null && request.arguments() != null && request.arguments().containsKey("custom_status_id")) {
+            Object val = request.arguments().get("custom_status_id");
+            if (val instanceof Number num) {
+                return num.longValue();
+            } else if (val != null) {
+                try {
+                    return Long.parseLong(val.toString().trim());
+                } catch (NumberFormatException _) {
+                    throw new IllegalArgumentException("custom_status_id must be a numeric ID, got: " + val);
+                }
+            }
+        }
+        return null;
+    }
+
+    private void validateCustomStatusBounds(Long customStatusId) {
+        if (customStatusId == null) return;
+        if (customStatusId <= 0) {
+            throw new IllegalArgumentException("customStatusId must be a positive integer, got: " + customStatusId);
+        }
+        if (customStatusId > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("customStatusId " + customStatusId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits custom_status_id on ticket inputs to 32-bit integers.");
+        }
+    }
+
+    private Long resolveTicketFormId(Long ticketFormId, @Nullable CallToolRequest request) {
+        if (ticketFormId != null) {
+            return ticketFormId;
+        }
+        if (request != null && request.arguments() != null) {
+            if (request.arguments().containsKey("ticket_form_id")) {
+                Object val = request.arguments().get("ticket_form_id");
+                if (val instanceof Number num) {
+                    return num.longValue();
+                } else if (val != null) {
+                    try {
+                        return Long.parseLong(val.toString().trim());
+                    } catch (NumberFormatException _) {
+                        throw new IllegalArgumentException("ticket_form_id must be a numeric ID, got: " + val);
+                    }
+                }
+            } else if (request.arguments().containsKey("ticketFormId")) {
+                Object val = request.arguments().get("ticketFormId");
+                if (val instanceof Number num) {
+                    return num.longValue();
+                } else if (val != null) {
+                    try {
+                        return Long.parseLong(val.toString().trim());
+                    } catch (NumberFormatException _) {
+                        throw new IllegalArgumentException("ticketFormId must be a numeric ID, got: " + val);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private void validateTicketFormBounds(Long ticketFormId) {
+        if (ticketFormId == null) return;
+        if (ticketFormId <= 0) {
+            throw new IllegalArgumentException("ticketFormId must be a positive integer, got: " + ticketFormId);
+        }
+    }
+
+    public void clearCustomStatusCache() {
+        synchronized (this) {
+            this.cachedCustomStatuses = null;
+            this.customStatusCacheExpiresAtMs = 0L;
+            this.cachedTicketFormStatuses = null;
+            this.ticketFormStatusCacheExpiresAtMs = 0L;
+        }
+    }
+
+    public void clearTicketFormCache() {
+        synchronized (this) {
+            this.cachedTicketForms = null;
+            this.ticketFormCacheExpiresAtMs = 0L;
+        }
+    }
+
+    public void clearAllCaches() {
+        clearCustomStatusCache();
+        clearTicketFormCache();
+    }
+
+    List<TicketFieldCustomStatusObject> getCachedCustomStatuses(boolean forceRefresh) {
+        if (customStatusClient == null) {
+            return Collections.emptyList();
+        }
+        long now = System.currentTimeMillis();
+        if (!forceRefresh && cachedCustomStatuses != null && now < customStatusCacheExpiresAtMs) {
+            return cachedCustomStatuses;
+        }
+        synchronized (this) {
+            now = System.currentTimeMillis();
+            if (!forceRefresh && cachedCustomStatuses != null && now < customStatusCacheExpiresAtMs) {
+                return cachedCustomStatuses;
+            }
+            try {
+                CustomStatusesResponse resp = customStatusClient.listCustomStatuses(null, null).block();
+                if (resp != null && resp.customStatuses() != null) {
+                    this.cachedCustomStatuses = Collections.unmodifiableList(new ArrayList<>(resp.customStatuses()));
+                    this.customStatusCacheExpiresAtMs = now + CUSTOM_STATUS_CACHE_TTL_MS;
+                    log.debug("Refreshed custom status cache with {} statuses (TTL: {}ms)", this.cachedCustomStatuses.size(), CUSTOM_STATUS_CACHE_TTL_MS);
+                } else {
+                    this.cachedCustomStatuses = Collections.emptyList();
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch custom statuses from Zendesk: {}", e.getMessage());
+                if (cachedCustomStatuses != null && !cachedCustomStatuses.isEmpty()) {
+                    log.info("Using stale custom status cache due to fetch error");
+                    return cachedCustomStatuses;
+                }
+                throw new IllegalArgumentException("Failed to fetch custom statuses from Zendesk: " + e.getMessage(), e);
+            }
+            return cachedCustomStatuses;
+        }
+    }
+
+    List<TicketFormStatus> getCachedTicketFormStatuses(boolean forceRefresh) {
+        if (customStatusClient == null) {
+            return Collections.emptyList();
+        }
+        long now = System.currentTimeMillis();
+        if (!forceRefresh && cachedTicketFormStatuses != null && now < ticketFormStatusCacheExpiresAtMs) {
+            return cachedTicketFormStatuses;
+        }
+        synchronized (this) {
+            now = System.currentTimeMillis();
+            if (!forceRefresh && cachedTicketFormStatuses != null && now < ticketFormStatusCacheExpiresAtMs) {
+                return cachedTicketFormStatuses;
+            }
+            try {
+                TicketFormStatusesResponse resp = customStatusClient.listTicketFormStatuses(null).block();
+                if (resp != null && resp.ticketFormStatuses() != null) {
+                    this.cachedTicketFormStatuses = Collections.unmodifiableList(new ArrayList<>(resp.ticketFormStatuses()));
+                    this.ticketFormStatusCacheExpiresAtMs = now + CUSTOM_STATUS_CACHE_TTL_MS;
+                    log.debug("Refreshed ticket form status cache with {} mappings (TTL: {}ms)", this.cachedTicketFormStatuses.size(), CUSTOM_STATUS_CACHE_TTL_MS);
+                } else {
+                    this.cachedTicketFormStatuses = Collections.emptyList();
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch ticket form statuses from Zendesk: {}", e.getMessage());
+                if (cachedTicketFormStatuses != null && !cachedTicketFormStatuses.isEmpty()) {
+                    log.info("Using stale ticket form status cache due to fetch error");
+                    return cachedTicketFormStatuses;
+                }
+                this.cachedTicketFormStatuses = Collections.emptyList();
+            }
+            return cachedTicketFormStatuses;
+        }
+    }
+
+    List<TicketForm> getCachedTicketForms(boolean forceRefresh) {
+        if (ticketFormsClient == null) {
+            return Collections.emptyList();
+        }
+        long now = System.currentTimeMillis();
+        if (!forceRefresh && cachedTicketForms != null && now < ticketFormCacheExpiresAtMs) {
+            return cachedTicketForms;
+        }
+        synchronized (this) {
+            now = System.currentTimeMillis();
+            if (!forceRefresh && cachedTicketForms != null && now < ticketFormCacheExpiresAtMs) {
+                return cachedTicketForms;
+            }
+            try {
+                Mono<TicketFormsResponse> mono = ticketFormsClient.listTicketForms();
+                TicketFormsResponse resp = mono != null ? mono.block() : null;
+                if (resp != null && resp.getTicketForms() != null) {
+                    this.cachedTicketForms = Collections.unmodifiableList(new ArrayList<>(resp.getTicketForms()));
+                    this.ticketFormCacheExpiresAtMs = now + TICKET_FORM_CACHE_TTL_MS;
+                    log.debug("Refreshed ticket form cache with {} forms (TTL: {}ms)", this.cachedTicketForms.size(), TICKET_FORM_CACHE_TTL_MS);
+                } else {
+                    this.cachedTicketForms = Collections.emptyList();
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch ticket forms from Zendesk: {}", e.getMessage());
+                if (cachedTicketForms != null && !cachedTicketForms.isEmpty()) {
+                    log.info("Using stale ticket form cache due to fetch error");
+                    return cachedTicketForms;
+                }
+                this.cachedTicketForms = Collections.emptyList();
+            }
+            return cachedTicketForms;
+        }
+    }
+
+    private TicketForm validateTicketForm(Long ticketFormId) {
+        if (ticketFormId == null) return null;
+        if (ticketFormsClient == null) {
+            log.warn("TicketFormsClient not configured; skipping remote ticket form validation for ID: {}", ticketFormId);
+            return null;
+        }
+
+        List<TicketForm> forms = getCachedTicketForms(false);
+        if (forms == null || forms.isEmpty()) {
+            return null;
+        }
+
+        Optional<TicketForm> matchOpt = forms.stream()
+                .filter(f -> f != null && f.getId() != null && f.getId().equals(ticketFormId))
+                .findFirst();
+
+        if (matchOpt.isEmpty()) {
+            String activeList = forms.stream()
+                    .filter(f -> f != null && Boolean.TRUE.equals(f.getActive()))
+                    .map(f -> String.format("[%d: '%s']", f.getId(), f.getName()))
+                    .collect(Collectors.joining(", "));
+            throw new IllegalArgumentException("Ticket form ID " + ticketFormId + " does not exist. Active ticket forms are: " + (activeList.isEmpty() ? "none" : activeList));
+        }
+
+        TicketForm form = matchOpt.get();
+        if (!Boolean.TRUE.equals(form.getActive())) {
+            throw new IllegalArgumentException("Ticket form ID " + ticketFormId + " ('" + form.getName() + "') is inactive.");
+        }
+
+        return form;
+    }
+
+    private TicketFieldCustomStatusObject validateCustomStatus(Long customStatusId, @Nullable String targetStatus) {
+        if (customStatusId == null) return null;
+        if (customStatusClient == null) {
+            log.warn("CustomStatusClient not configured; skipping remote custom status validation for ID: {}", customStatusId);
+            return null;
+        }
+
+        List<TicketFieldCustomStatusObject> statuses = getCachedCustomStatuses(false);
+        if (statuses == null || statuses.isEmpty()) {
+            throw new IllegalArgumentException("No custom statuses found for this Zendesk account. Make sure custom ticket statuses are enabled.");
+        }
+
+        Optional<TicketFieldCustomStatusObject> matchOpt = statuses.stream()
+                .filter(s -> s != null && s.getId() != null && s.getId().equals(customStatusId))
+                .findFirst();
+
+        if (matchOpt.isEmpty()) {
+            String activeList = statuses.stream()
+                    .filter(s -> s != null && Boolean.TRUE.equals(s.getActive()))
+                    .map(s -> String.format("[%d: '%s' (%s)]", s.getId(), s.getAgentLabel(), s.getStatusCategory() != null ? s.getStatusCategory().getValue() : "unknown"))
+                    .collect(Collectors.joining(", "));
+            throw new IllegalArgumentException("Custom status ID " + customStatusId + " does not exist. Active custom statuses are: " + (activeList.isEmpty() ? "none" : activeList));
+        }
+
+        TicketFieldCustomStatusObject statusObj = matchOpt.get();
+        if (!Boolean.TRUE.equals(statusObj.getActive())) {
+            throw new IllegalArgumentException("Custom status ID " + customStatusId + " ('" + statusObj.getAgentLabel() + "') is inactive.");
+        }
+
+        if (StringUtils.isNotEmpty(targetStatus)) {
+            String expectedCat = targetStatus.trim().toLowerCase();
+            String actualCat = statusObj.getStatusCategory() != null ? statusObj.getStatusCategory().getValue() : null;
+            if (actualCat != null && !actualCat.equalsIgnoreCase(expectedCat)) {
+                String matchingStatuses = statuses.stream()
+                        .filter(s -> s != null && Boolean.TRUE.equals(s.getActive()) && s.getStatusCategory() != null && expectedCat.equalsIgnoreCase(s.getStatusCategory().getValue()))
+                        .map(s -> String.format("[%d: '%s']", s.getId(), s.getAgentLabel()))
+                        .collect(Collectors.joining(", "));
+                throw new IllegalArgumentException(String.format(
+                        "Custom status ID %d ('%s') belongs to category '%s', which does not match status '%s'. Valid active custom statuses for '%s' are: %s",
+                        customStatusId, statusObj.getAgentLabel(), actualCat, expectedCat, expectedCat,
+                        matchingStatuses.isEmpty() ? "none" : matchingStatuses
+                ));
+            }
+        }
+
+        return statusObj;
+    }
+
+    private void validateTicketCustomStatusCategoryMatch(Long ticketId, Ticket currentTicket, TicketFieldCustomStatusObject customStatus, Long customStatusId) {
+        if (customStatus == null || currentTicket == null || currentTicket.getStatus() == null) return;
+        String customCat = customStatus.getStatusCategory() != null ? customStatus.getStatusCategory().getValue() : null;
+        String currentStatusVal = currentTicket.getStatus().getValue();
+        if (customCat != null && !customCat.equalsIgnoreCase(currentStatusVal)) {
+            throw new IllegalArgumentException(String.format(
+                    "Custom status ID %d ('%s') belongs to category '%s', but ticket #%d currently has status '%s'. To change to a custom status in a different category, you must also provide the matching 'status' parameter (status='%s').",
+                    customStatusId, customStatus.getAgentLabel(), customCat, ticketId, currentStatusVal, customCat
+            ));
+        }
+    }
+
+    private void validateCustomStatusForForm(TicketFieldCustomStatusObject customStatus, Long ticketFormId) {
+        if (customStatus == null || ticketFormId == null) return;
+        if (Boolean.TRUE.equals(customStatus.getIsDefault())) {
+            return;
+        }
+        List<TicketFormStatus> formStatuses = getCachedTicketFormStatuses(false);
+        if (formStatuses == null || formStatuses.isEmpty()) {
+            return;
+        }
+
+        boolean formHasSpecificStatuses = formStatuses.stream()
+                .anyMatch(fs -> fs != null && ticketFormId.equals(fs.ticketFormId()));
+        if (!formHasSpecificStatuses) {
+            return;
+        }
+
+        boolean statusAllowedOnForm = formStatuses.stream()
+                .anyMatch(fs -> fs != null && ticketFormId.equals(fs.ticketFormId()) && customStatus.getId().equals(fs.customStatusId()));
+
+        if (!statusAllowedOnForm) {
+            List<TicketFieldCustomStatusObject> allStatuses = getCachedCustomStatuses(false);
+            String category = customStatus.getStatusCategory() != null ? customStatus.getStatusCategory().getValue() : null;
+            String validForForm = allStatuses.stream()
+                    .filter(s -> s != null && Boolean.TRUE.equals(s.getActive()))
+                    .filter(s -> category == null || (s.getStatusCategory() != null && category.equalsIgnoreCase(s.getStatusCategory().getValue())))
+                    .filter(s -> Boolean.TRUE.equals(s.getIsDefault()) || formStatuses.stream().anyMatch(fs -> ticketFormId.equals(fs.ticketFormId()) && s.getId().equals(fs.customStatusId())))
+                    .map(s -> String.format("[%d: '%s']", s.getId(), s.getAgentLabel()))
+                    .collect(Collectors.joining(", "));
+
+            throw new IllegalArgumentException(String.format(
+                    "Custom status ID %d ('%s') cannot be used with ticket form #%d. Valid active custom statuses for this form%s are: %s.",
+                    customStatus.getId(),
+                    customStatus.getAgentLabel(),
+                    ticketFormId,
+                    category != null ? " under category '" + category + "'" : "",
+                    validForForm.isEmpty() ? "none" : validForForm
+            ));
+        }
     }
 
     private TicketUpdateInputType parseTicketType(String type) {
@@ -409,8 +824,7 @@ public class ZendeskTools {
         return result;
     }
 
-    private TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
-        TicketUpdateInput input = new TicketUpdateInput();
+    private TicketUpdateInput populateInputFromParams(TicketUpdateInput input, String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
         if (StringUtils.isNotEmpty(comment) || !tokens.isEmpty()) {
             if (isPublic == null) {
                 throw new IllegalArgumentException("isPublic is required when a comment or attachment is provided. Set to true for a public reply, or false for an internal note.");
@@ -443,6 +857,10 @@ public class ZendeskTools {
         return input;
     }
 
+    private TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
+        return populateInputFromParams(new TicketUpdateInput(), comment, status, priority, isPublic, tokens, customFields);
+    }
+
     private TicketUpdateInput buildTicketUpdateInput(
             String comment,
             String status,
@@ -452,9 +870,20 @@ public class ZendeskTools {
             List<TicketCustomField> customFields,
             Long requesterId,
             String type,
-            Boolean convertToIncident
+            Boolean convertToIncident,
+            Long customStatusId,
+            Long ticketFormId
     ) {
-        TicketUpdateInput input = buildInputFromParams(comment, status, priority, isPublic, tokens, customFields);
+        TicketUpdateInput input;
+        if (ticketFormId != null) {
+            TicketUpdateInputWithForm formInput = new TicketUpdateInputWithForm();
+            formInput.setTicketFormId(ticketFormId);
+            input = formInput;
+        } else {
+            input = new TicketUpdateInput();
+        }
+        populateInputFromParams(input, comment, status, priority, isPublic, tokens, customFields);
+
         if (requesterId != null) {
             if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
                 throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
@@ -471,7 +900,40 @@ public class ZendeskTools {
         } else if (Boolean.TRUE.equals(convertToIncident)) {
             input.setType(TicketUpdateInputType.INCIDENT);
         }
+
+        if (customStatusId != null) {
+            input.setCustomStatusId(customStatusId.intValue());
+        }
         return input;
+    }
+
+    private TicketUpdateInput buildTicketUpdateInput(
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> tokens,
+            List<TicketCustomField> customFields,
+            Long requesterId,
+            String type,
+            Boolean convertToIncident,
+            Long customStatusId
+    ) {
+        return buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident, customStatusId, null);
+    }
+
+    private TicketUpdateInput buildTicketUpdateInput(
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> tokens,
+            List<TicketCustomField> customFields,
+            Long requesterId,
+            String type,
+            Boolean convertToIncident
+    ) {
+        return buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident, null, null);
     }
 
     private void validateProblemTypeConflict(Long problemId, String type) {
@@ -522,7 +984,7 @@ public class ZendeskTools {
         input.setProblemId(problemId.intValue());
     }
 
-    @Tool(description = "Update an existing Zendesk ticket with a comment, status, priority, attachments, or link to a problem ticket")
+    @Tool(description = "Update an existing Zendesk ticket with a comment, status, priority, attachments, custom status, ticket form, or link to a problem ticket")
     public TicketUpdateResponse updateTicket(
             @ToolArg(description = "The numeric ticket ID to update") Long ticketId,
             @ToolArg(description = "Comment text to add to the ticket") @Nullable String comment,
@@ -536,21 +998,42 @@ public class ZendeskTools {
             @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
             @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
             @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
+            @ToolArg(description = "Optional numeric ID of a custom ticket status (from listCustomStatuses)") @Nullable Long customStatusId,
+            @ToolArg(description = "Optional numeric ticket form ID to change the form used for this ticket") @Nullable Long ticketFormId,
             CallToolRequest request
     ) {
         log.info("MCP Tool called: updateTicket(id={})", ticketId);
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
-        validateKnownParameters(request, "updateTicket", "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields", "requesterId", "type");
+        validateKnownParameters(request, "updateTicket", "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields", "requesterId", "type", "customStatusId", "custom_status_id", "ticketFormId", "ticket_form_id");
         validateProblemTypeConflict(problemId, type);
         validateProblemTarget(problemId);
+
+        final Long resolvedTicketFormId = resolveTicketFormId(ticketFormId, request);
+        if (resolvedTicketFormId != null) {
+            validateTicketFormBounds(resolvedTicketFormId);
+            validateTicketForm(resolvedTicketFormId);
+        }
+
+        final Long resolvedCustomStatusId = resolveCustomStatusId(customStatusId, request);
+        TicketFieldCustomStatusObject validatedCustomStatus = null;
+        if (resolvedCustomStatusId != null) {
+            validateCustomStatusBounds(resolvedCustomStatusId);
+            validatedCustomStatus = validateCustomStatus(resolvedCustomStatusId, status);
+            if (resolvedTicketFormId != null) {
+                validateCustomStatusForForm(validatedCustomStatus, resolvedTicketFormId);
+            }
+        }
+
         List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-        TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
+        TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident, resolvedCustomStatusId, resolvedTicketFormId);
 
         final boolean isTypeUnset = isTypeUnset(type);
         final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
 
-        if (problemId != null || type != null) {
-            TicketResponse showResp = ticketClient.showTicket(ticketId).block();
+        boolean needsCurrentTicket = problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM)) || (resolvedCustomStatusId != null && StringUtils.isEmpty(status));
+        if (needsCurrentTicket) {
+            Mono<TicketResponse> showMono = ticketClient.showTicket(ticketId);
+            TicketResponse showResp = showMono != null ? showMono.block() : null;
             if (showResp == null || showResp.getTicket() == null) {
                 throw new IllegalArgumentException("Ticket #" + ticketId + " could not be retrieved. Does it exist?");
             }
@@ -560,6 +1043,13 @@ public class ZendeskTools {
             }
             if (problemId != null) {
                 applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
+            }
+            if (resolvedCustomStatusId != null && StringUtils.isEmpty(status)) {
+                validateTicketCustomStatusCategoryMatch(ticketId, currentTicket, validatedCustomStatus, resolvedCustomStatusId);
+            }
+            Long formIdToValidate = resolvedTicketFormId != null ? resolvedTicketFormId : currentTicket.getTicketFormId();
+            if (validatedCustomStatus != null && formIdToValidate != null) {
+                validateCustomStatusForForm(validatedCustomStatus, formIdToValidate);
             }
         }
 
@@ -577,9 +1067,46 @@ public class ZendeskTools {
             Long problemId,
             Boolean convertToIncident,
             List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type,
+            Long customStatusId,
             CallToolRequest request
     ) {
-        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, request);
+        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, null, request);
+    }
+
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type,
+            CallToolRequest request
+    ) {
+        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, null, request);
+    }
+
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            CallToolRequest request
+    ) {
+        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null, request);
     }
 
     public TicketUpdateResponse updateTicket(
@@ -594,7 +1121,7 @@ public class ZendeskTools {
             Boolean convertToIncident,
             List<Map<String, Object>> customFields
     ) {
-        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null);
+        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null, (CallToolRequest) null);
     }
     public static final long MAX_ATTACHMENT_SIZE_BYTES = 50L * 1024 * 1024; // 50MB
 
@@ -729,7 +1256,7 @@ public class ZendeskTools {
     }
 
 
-    @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, attachments, or link to a problem ticket. Supports concurrent immediate updates or Zendesk async bulk jobs.")
+    @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, attachments, custom status, ticket form, or link to a problem ticket. Supports concurrent immediate updates or Zendesk async bulk jobs.")
     public BatchUpdateResponse batchUpdateTickets(
             @ToolArg(description = "List of numeric ticket IDs to update") List<Long> ticketIds,
             @ToolArg(description = "Comment text to add to the tickets") @Nullable String comment,
@@ -744,10 +1271,12 @@ public class ZendeskTools {
             @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
             @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
             @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
+            @ToolArg(description = "Optional numeric ID of a custom ticket status (from listCustomStatuses)") @Nullable Long customStatusId,
+            @ToolArg(description = "Optional numeric ticket form ID to change the form used for these tickets") @Nullable Long ticketFormId,
             CallToolRequest request
     ) {
         log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={})", ticketIds, asyncBulk);
-        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "asyncBulk", "problemId", "convertToIncident", "customFields", "requesterId", "type");
+        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "asyncBulk", "problemId", "convertToIncident", "customFields", "requesterId", "type", "customStatusId", "custom_status_id", "ticketFormId", "ticket_form_id");
         if (ticketIds == null || ticketIds.isEmpty()) {
             return new BatchUpdateResponse(null, null, Collections.emptyList());
         }
@@ -776,12 +1305,29 @@ public class ZendeskTools {
         validateProblemTypeConflict(problemId, type);
         validateProblemTarget(problemId);
 
+        final Long resolvedTicketFormId = resolveTicketFormId(ticketFormId, request);
+        if (resolvedTicketFormId != null) {
+            validateTicketFormBounds(resolvedTicketFormId);
+            validateTicketForm(resolvedTicketFormId);
+        }
+
+        final Long resolvedCustomStatusId = resolveCustomStatusId(customStatusId, request);
+        TicketFieldCustomStatusObject validatedCustomStatus = null;
+        if (resolvedCustomStatusId != null) {
+            validateCustomStatusBounds(resolvedCustomStatusId);
+            validatedCustomStatus = validateCustomStatus(resolvedCustomStatusId, status);
+            if (resolvedTicketFormId != null) {
+                validateCustomStatusForForm(validatedCustomStatus, resolvedTicketFormId);
+            }
+        }
+
         final boolean isTypeUnset = isTypeUnset(type);
         final TicketUpdateInputType parsedType = (type != null && !isTypeUnset) ? parseTicketType(type) : null;
         List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
 
         if (Boolean.TRUE.equals(asyncBulk)) {
-            if (problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM))) {
+            boolean needsCurrentTicket = problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM)) || (resolvedCustomStatusId != null && StringUtils.isEmpty(status));
+            if (needsCurrentTicket) {
                 List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
                         .flatMap(id -> {
                             Mono<TicketResponse> showMono = ticketClient.showTicket(id);
@@ -789,7 +1335,7 @@ public class ZendeskTools {
                                 return Mono.empty();
                             }
                             return showMono.onErrorResume(e -> Mono.empty())
-                                    .filter(resp -> resp != null && resp.getTicket() != null)
+                                     .filter(resp -> resp != null && resp.getTicket() != null)
                                     .map(TicketResponse::getTicket);
                         })
                         .collectList()
@@ -803,11 +1349,18 @@ public class ZendeskTools {
                             TicketUpdateInput testInput = new TicketUpdateInput();
                             applyProblemIdLogic(currentTicket, testInput, problemId, convertToIncident);
                         }
+                        if (resolvedCustomStatusId != null && StringUtils.isEmpty(status)) {
+                            validateTicketCustomStatusCategoryMatch(currentTicket.getId(), currentTicket, validatedCustomStatus, resolvedCustomStatusId);
+                        }
+                        Long formIdToValidate = resolvedTicketFormId != null ? resolvedTicketFormId : currentTicket.getTicketFormId();
+                        if (validatedCustomStatus != null && formIdToValidate != null) {
+                            validateCustomStatusForForm(validatedCustomStatus, formIdToValidate);
+                        }
                     }
                 }
             }
 
-            TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
+            TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident, resolvedCustomStatusId, resolvedTicketFormId);
             if (problemId != null) {
                 input.setProblemId(problemId.intValue());
                 input.setType(TicketUpdateInputType.INCIDENT);
@@ -826,17 +1379,18 @@ public class ZendeskTools {
         }
 
         // Concurrent immediate updates via Reactor Flux
+        final TicketFieldCustomStatusObject finalValidatedCustomStatus = validatedCustomStatus;
         List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
-                    TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident);
+                    TicketUpdateInput input = buildTicketUpdateInput(comment, status, priority, isPublic, tokens, parsedCustomFields, requesterId, type, convertToIncident, resolvedCustomStatusId, resolvedTicketFormId);
 
                     Mono<TicketUpdateInput> inputMono;
-                    boolean needsCurrentTicket = problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM));
+                    boolean needsCurrentTicket = problemId != null || (type != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM)) || (resolvedCustomStatusId != null && StringUtils.isEmpty(status));
                     if (needsCurrentTicket) {
                         Mono<TicketResponse> showMono = ticketClient.showTicket(id);
                         if (showMono != null) {
                             inputMono = showMono
-                                    .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?")))
+                                     .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?")))
                                     .flatMap(resp -> {
                                         if (resp.getTicket() == null) {
                                             return Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?"));
@@ -847,6 +1401,13 @@ public class ZendeskTools {
                                         }
                                         if (problemId != null) {
                                             applyProblemIdLogic(currentTicket, input, problemId, convertToIncident);
+                                        }
+                                        if (resolvedCustomStatusId != null && StringUtils.isEmpty(status)) {
+                                            validateTicketCustomStatusCategoryMatch(id, currentTicket, finalValidatedCustomStatus, resolvedCustomStatusId);
+                                        }
+                                        Long formIdToValidate = resolvedTicketFormId != null ? resolvedTicketFormId : currentTicket.getTicketFormId();
+                                        if (finalValidatedCustomStatus != null && formIdToValidate != null) {
+                                            validateCustomStatusForForm(finalValidatedCustomStatus, formIdToValidate);
                                         }
                                         return Mono.just(input);
                                     });
@@ -870,6 +1431,46 @@ public class ZendeskTools {
                 .block();
 
         return new BatchUpdateResponse(null, null, results != null ? results : Collections.emptyList());
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean asyncBulk,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type,
+            Long customStatusId,
+            CallToolRequest request
+    ) {
+        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, customStatusId, null, request);
+    }
+
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean asyncBulk,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type,
+            CallToolRequest request
+    ) {
+        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, null, null, request);
     }
 
     public BatchUpdateResponse batchUpdateTickets(
@@ -926,6 +1527,191 @@ public class ZendeskTools {
         return ticketClient.showTicketField(ticketFieldId).block();
     }
 
+    @Tool(description = "List Zendesk custom ticket statuses and status categories with context on which forms they can be used with. Supports filtering by statusCategory and ticketFormId. By default returns a compact summary of active statuses to save tokens.")
+    public Map<String, Object> listCustomStatuses(
+            @ToolArg(description = "Optional filter by status category: new, open, pending, hold, solved") @Nullable String statusCategory,
+            @ToolArg(description = "Optional filter by numeric ticket form ID to return only custom statuses available for that specific form") @Nullable Long ticketFormId,
+            @ToolArg(description = "Whether to include inactive custom statuses. Defaults to false (active statuses only)") @Nullable Boolean includeInactive,
+            @ToolArg(description = "Whether to return full status objects or just compact summary. Defaults to false (summary mode)") @Nullable Boolean fullPayload,
+            @Nullable CallToolRequest request
+    ) {
+        log.info("MCP Tool called: listCustomStatuses(statusCategory='{}', ticketFormId={}, includeInactive={}, fullPayload={})", statusCategory, ticketFormId, includeInactive, fullPayload);
+        validateKnownParameters(request, "listCustomStatuses", "statusCategory", "ticketFormId", "ticket_form_id", "includeInactive", "fullPayload");
+
+        Long resolvedTicketFormId = ticketFormId;
+        if (resolvedTicketFormId == null && request != null && request.arguments() != null) {
+            if (request.arguments().containsKey("ticket_form_id")) {
+                Object val = request.arguments().get("ticket_form_id");
+                if (val instanceof Number n) {
+                    resolvedTicketFormId = n.longValue();
+                } else if (val != null) {
+                    try {
+                        resolvedTicketFormId = Long.parseLong(val.toString().trim());
+                    } catch (NumberFormatException _) {}
+                }
+            } else if (request.arguments().containsKey("ticketFormId")) {
+                Object val = request.arguments().get("ticketFormId");
+                if (val instanceof Number n) {
+                    resolvedTicketFormId = n.longValue();
+                } else if (val != null) {
+                    try {
+                        resolvedTicketFormId = Long.parseLong(val.toString().trim());
+                    } catch (NumberFormatException _) {}
+                }
+            }
+        }
+
+        String normalizedCategory = null;
+        if (StringUtils.isNotEmpty(statusCategory)) {
+            normalizedCategory = statusCategory.trim().toLowerCase();
+            Set<String> validCategories = Set.of("new", "open", "pending", "hold", "solved");
+            if (!validCategories.contains(normalizedCategory)) {
+                throw new IllegalArgumentException("Invalid status category: '" + statusCategory + "'. Allowed categories are: new, open, pending, hold, solved.");
+            }
+        }
+
+        if (customStatusClient == null) {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("custom_statuses", Collections.emptyList());
+            empty.put("status_categories", Collections.emptyMap());
+            return empty;
+        }
+
+        List<TicketFieldCustomStatusObject> allStatuses = getCachedCustomStatuses(false);
+        List<TicketFieldCustomStatusObject> statuses = new ArrayList<>(allStatuses);
+
+        if (!Boolean.TRUE.equals(includeInactive)) {
+            statuses = statuses.stream()
+                    .filter(s -> Boolean.TRUE.equals(s.getActive()))
+                    .collect(Collectors.toList());
+        }
+
+        if (normalizedCategory != null) {
+            final String cat = normalizedCategory;
+            statuses = statuses.stream()
+                    .filter(s -> s.getStatusCategory() != null && cat.equalsIgnoreCase(s.getStatusCategory().getValue()))
+                    .collect(Collectors.toList());
+        }
+
+        List<TicketFormStatus> allFormStatuses = getCachedTicketFormStatuses(false);
+        Map<Long, List<Long>> statusToForms = new LinkedHashMap<>();
+        if (allFormStatuses != null) {
+            for (TicketFormStatus fs : allFormStatuses) {
+                if (fs != null && fs.customStatusId() != null && fs.ticketFormId() != null) {
+                    statusToForms.computeIfAbsent(fs.customStatusId(), k -> new ArrayList<>()).add(fs.ticketFormId());
+                }
+            }
+        }
+
+        if (resolvedTicketFormId != null) {
+            final Long formId = resolvedTicketFormId;
+            statuses = statuses.stream().filter(s -> {
+                if (s == null) return false;
+                if (Boolean.TRUE.equals(s.getIsDefault())) return true;
+                if (statusToForms.isEmpty()) return true;
+                List<Long> forms = statusToForms.get(s.getId());
+                return forms != null ? forms.contains(formId) : true;
+            }).collect(Collectors.toList());
+        }
+
+        Map<String, List<Map<String, Object>>> categoryMap = new LinkedHashMap<>();
+        List<String> stdCategories = List.of("new", "open", "pending", "hold", "solved");
+        for (String cat : stdCategories) {
+            if (normalizedCategory != null && !normalizedCategory.equalsIgnoreCase(cat)) {
+                continue;
+            }
+            categoryMap.put(cat, new ArrayList<>());
+        }
+        for (TicketFieldCustomStatusObject s : statuses) {
+            String cat = s.getStatusCategory() != null ? s.getStatusCategory().getValue().toLowerCase() : "unknown";
+            List<Map<String, Object>> catList = categoryMap.computeIfAbsent(cat, k -> new ArrayList<>());
+            Map<String, Object> catItem = new LinkedHashMap<>();
+            catItem.put("id", s.getId());
+            catItem.put("agent_label", s.getAgentLabel());
+            catItem.put("default", s.getIsDefault());
+            if (statusToForms.containsKey(s.getId())) {
+                catItem.put("ticket_form_ids", statusToForms.get(s.getId()));
+            } else {
+                catItem.put("applies_to_all_forms", true);
+            }
+            catList.add(catItem);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (resolvedTicketFormId != null) {
+            result.put("ticket_form_id", resolvedTicketFormId);
+        }
+
+        if (Boolean.TRUE.equals(fullPayload)) {
+            result.put("custom_statuses", statuses);
+            result.put("status_categories", categoryMap);
+            if (allFormStatuses != null && !allFormStatuses.isEmpty()) {
+                result.put("ticket_form_statuses", allFormStatuses);
+            }
+            return result;
+        }
+
+        List<Map<String, Object>> summaries = statuses.stream().map(s -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", s.getId());
+            item.put("agent_label", s.getAgentLabel());
+            item.put("status_category", s.getStatusCategory() != null ? s.getStatusCategory().getValue() : null);
+            item.put("active", s.getActive());
+            item.put("default", s.getIsDefault());
+            if (statusToForms.containsKey(s.getId())) {
+                item.put("ticket_form_ids", statusToForms.get(s.getId()));
+            } else {
+                item.put("applies_to_all_forms", true);
+            }
+            if (StringUtils.isNotEmpty(s.getDescription())) {
+                item.put("description", s.getDescription());
+            }
+            return item;
+        }).collect(Collectors.toList());
+
+        result.put("custom_statuses", summaries);
+        result.put("status_categories", categoryMap);
+        return result;
+    }
+
+    public Map<String, Object> listCustomStatuses(
+            @Nullable String statusCategory,
+            @Nullable Boolean includeInactive,
+            @Nullable Boolean fullPayload,
+            @Nullable CallToolRequest request
+    ) {
+        return listCustomStatuses(statusCategory, null, includeInactive, fullPayload, request);
+    }
+
+    public Map<String, Object> listCustomStatuses(
+            @Nullable String statusCategory,
+            @Nullable Long ticketFormId,
+            @Nullable Boolean includeInactive,
+            @Nullable Boolean fullPayload
+    ) {
+        return listCustomStatuses(statusCategory, ticketFormId, includeInactive, fullPayload, null);
+    }
+
+    public Map<String, Object> listCustomStatuses(
+            @Nullable String statusCategory,
+            @Nullable Boolean includeInactive,
+            @Nullable Boolean fullPayload
+    ) {
+        return listCustomStatuses(statusCategory, null, includeInactive, fullPayload, null);
+    }
+
+    public Map<String, Object> listCustomStatuses() {
+        return listCustomStatuses(null, null, null, null, null);
+    }
+
+    public Map<String, Object> listStatusCategories() {
+        return listCustomStatuses();
+    }
+
+    public Map<String, Object> listStatusCategories(@Nullable Long ticketFormId) {
+        return listCustomStatuses(null, ticketFormId, false, false, null);
+    }
+
     public Map<String, Object> listTicketForms() {
         return listTicketForms(null, null);
     }
@@ -936,8 +1722,8 @@ public class ZendeskTools {
             @ToolArg(description = "Whether to return full form schemas (including conditions and field IDs) or just summary. Defaults to false (summary mode)") @Nullable Boolean fullPayload
     ) {
         log.info("MCP Tool called: listTicketForms(includeInactive={}, fullPayload={})", includeInactive, fullPayload);
-        TicketFormsResponse response = ticketFormsClient.listTicketForms().block();
-        if (response == null || response.getTicketForms() == null) {
+        List<TicketForm> allForms = getCachedTicketForms(false);
+        if (allForms == null || allForms.isEmpty()) {
             Map<String, Object> empty = new LinkedHashMap<>();
             empty.put(TICKET_FORMS_KEY, Collections.emptyList());
             return empty;
@@ -946,7 +1732,7 @@ public class ZendeskTools {
         boolean activeOnly = !Boolean.TRUE.equals(includeInactive);
         boolean isFull = Boolean.TRUE.equals(fullPayload);
 
-        List<TicketForm> forms = response.getTicketForms();
+        List<TicketForm> forms = new ArrayList<>(allForms);
         if (activeOnly) {
             forms = forms.stream()
                     .filter(f -> Boolean.TRUE.equals(f.getActive()))
@@ -978,6 +1764,10 @@ public class ZendeskTools {
             @ToolArg(description = "The numeric ticket form ID") Long ticketFormId
     ) {
         log.info("MCP Tool called: getTicketForm(id={})", ticketFormId);
+        if (ticketFormId == null) {
+            throw new IllegalArgumentException("ticketFormId is required");
+        }
+        validateTicketFormBounds(ticketFormId);
         return ticketFormsClient.showTicketForm(ticketFormId).block();
     }
 
