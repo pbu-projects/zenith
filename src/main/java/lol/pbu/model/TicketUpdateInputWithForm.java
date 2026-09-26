@@ -24,6 +24,12 @@ import lol.pbu.z4j.model.TicketUpdateInput;
 /**
  * Extension of {@link TicketUpdateInput} that includes the optional {@code ticket_form_id}
  * attribute for changing the ticket form during ticket update and batch update operations.
+ *
+ * <p><b>Technical Debt Note:</b> This subclass is a temporary bridge because {@code lol.pbu:z4j}
+ * currently lacks {@code ticket_form_id} on the upstream {@link TicketUpdateInput}. Once
+ * <a href="https://github.com/pbu-projects/zenith/issues/61">Issue #61</a> is addressed upstream
+ * in {@code z4j} by adding {@code ticket_form_id} directly to {@code TicketUpdateInput}, this class
+ * can be deprecated and removed in favor of the upstream model.</p>
  */
 @Serdeable
 @JsonInclude(JsonInclude.Include.NON_NULL)

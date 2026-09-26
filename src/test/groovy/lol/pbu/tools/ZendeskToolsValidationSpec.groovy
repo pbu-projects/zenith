@@ -24,6 +24,7 @@ import lol.pbu.model.CustomStatusesResponse
 import lol.pbu.model.CustomStatusResponse
 import lol.pbu.model.TicketFormStatus
 import lol.pbu.model.TicketFormStatusesResponse
+import lol.pbu.model.TicketMutationOptions
 import lol.pbu.model.TicketUpdateInputWithForm
 import lol.pbu.z4j.model.Ticket
 import lol.pbu.z4j.model.TicketForm
@@ -1947,6 +1948,89 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         notThrown(Exception)
+    }
+
+    def "updateTicket using TicketMutationOptions builder updates ticket fields, form, and custom status"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        TicketUpdateRequest capturedReq = null
+        1 * ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long ticketIdArg, TicketUpdateRequest req ->
+            capturedReq = req
+            def t = new Ticket()
+            t.setId(ticketIdArg)
+            t.setStatus(TicketStatus.OPEN)
+            def resp = new TicketUpdateResponse()
+            resp.setTicket(t)
+            return reactor.core.publisher.Mono.just(resp)
+        }
+
+        def options = TicketMutationOptions.builder()
+                .comment("Updating via TicketMutationOptions builder")
+                .status("open")
+                .priority("high")
+                .isPublic(true)
+                .customStatusId(101L)
+                .ticketFormId(1001L)
+                .build()
+
+        when: "calling updateTicket with options"
+        def response = tools.updateTicket(12345L, options)
+
+        then:
+        response != null
+        response.ticket.id == 12345L
+        capturedReq != null
+        capturedReq.ticket.comment.body == "Updating via TicketMutationOptions builder"
+        capturedReq.ticket.status == TicketUpdateInputStatus.OPEN
+        capturedReq.ticket.priority == TicketUpdateInputPriority.HIGH
+        capturedReq.ticket.customStatusId == 101L
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedReq.ticket).ticketFormId == 1001L
+    }
+
+    def "batchUpdateTickets using TicketMutationOptions builder updates multiple tickets"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        List<TicketUpdateRequest> capturedRequests = []
+        2 * ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long ticketIdArg, TicketUpdateRequest req ->
+            capturedRequests.add(req)
+            def t = new Ticket()
+            t.setId(ticketIdArg)
+            t.setStatus(TicketStatus.OPEN)
+            def resp = new TicketUpdateResponse()
+            resp.setTicket(t)
+            return reactor.core.publisher.Mono.just(resp)
+        }
+
+        def options = TicketMutationOptions.builder()
+                .comment("Batch update via options builder")
+                .status("open")
+                .isPublic(false)
+                .customStatusId(101L)
+                .ticketFormId(1001L)
+                .build()
+
+        when: "calling batchUpdateTickets with options"
+        def response = tools.batchUpdateTickets([101L, 102L], options)
+
+        then:
+        response != null
+        response.results.size() == 2
+        response.results.every { it.success }
+        capturedRequests.size() == 2
+        capturedRequests.every { req ->
+            req.ticket instanceof TicketUpdateInputWithForm &&
+            ((TicketUpdateInputWithForm) req.ticket).ticketFormId == 1001L &&
+            req.ticket.customStatusId == 101L &&
+            req.ticket.comment.body == "Batch update via options builder" &&
+            req.ticket.comment.isPublic == false
+        }
     }
 }
 
