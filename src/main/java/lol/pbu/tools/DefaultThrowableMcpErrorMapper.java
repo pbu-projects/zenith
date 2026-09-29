@@ -11,6 +11,10 @@ import jakarta.inject.Singleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
+
 /**
  * Fallback exception mapper for unhandled Throwables to prevent Micronaut MCP's internal
  * AbstractMcpMethodRegistry from crashing with "message must not be empty" when building McpError.
@@ -58,27 +62,76 @@ public class DefaultThrowableMcpErrorMapper implements McpErrorExceptionMapper<T
             return illegalArgMapper.map(argEx);
         }
 
-        log.error("Unhandled exception during MCP tool execution: {}", e.getMessage(), e);
-        String msg = e.getMessage();
-        if (msg == null || msg.isBlank()) {
-            msg = e.getClass().getSimpleName();
-        }
+        String msg = buildErrorMessage(e);
+        log.error("Unhandled exception during MCP tool execution: {}", msg, e);
         return McpError.builder(-32603)
                 .message(msg)
                 .build();
     }
 
+    public static String buildErrorMessage(Throwable e) {
+        if (e == null) {
+            return "Unknown error";
+        }
+        StringBuilder sb = new StringBuilder();
+        String primaryMsg = e.getMessage();
+        String simpleName = e.getClass().getSimpleName();
+        if (simpleName.isBlank()) {
+            simpleName = e.getClass().getName();
+        }
+        if (primaryMsg != null && !primaryMsg.isBlank()) {
+            sb.append(primaryMsg.trim());
+        } else {
+            sb.append(simpleName);
+        }
+
+        if (e.getCause() != null) {
+            String causeChain = formatCauseChain(e.getCause());
+            if (!causeChain.isBlank()) {
+                sb.append("; Caused by: ").append(causeChain);
+            }
+        }
+        return sb.toString();
+    }
+
+    public static String formatCauseChain(Throwable cause) {
+        if (cause == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable current = cause;
+        int depth = 0;
+        while (current != null && depth < 10 && seen.add(current)) {
+            String causeName = current.getClass().getSimpleName();
+            if (causeName.isBlank()) {
+                causeName = current.getClass().getName();
+            }
+            String causeMsg = current.getMessage();
+            if (!sb.isEmpty()) {
+                sb.append("; Caused by: ");
+            }
+            sb.append(causeName);
+            if (causeMsg != null && !causeMsg.isBlank()) {
+                sb.append(": ").append(causeMsg.trim());
+            }
+            current = current.getCause();
+            depth++;
+        }
+        return sb.toString();
+    }
+
     @SuppressWarnings("unchecked")
     private static <T extends Throwable> T findCause(Throwable t, Class<T> targetClass) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable current = t;
-        while (current != null) {
+        int depth = 0;
+        while (current != null && depth < 20 && seen.add(current)) {
             if (targetClass.isInstance(current)) {
                 return (T) current;
             }
-            if (current.getCause() == current) {
-                break;
-            }
             current = current.getCause();
+            depth++;
         }
         return null;
     }

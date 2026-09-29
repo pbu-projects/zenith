@@ -204,6 +204,23 @@ class ZendeskIntegrationSpec extends Specification {
         result.tickets.isEmpty()
     }
 
+    def "Ticket audits end-to-end integration with AutomaticAnswerSend and complex events via embedded HTTP server"() {
+        when: "calling getTicketAudits on ticket 123"
+        def auditsResp = ticketTools.getTicketAudits(123L)
+
+        then: "audits containing AutomaticAnswerSend and custom events are returned"
+        auditsResp != null
+        auditsResp.audits.size() == 1
+        def events = auditsResp.audits[0].events
+        events.size() == 3
+        events.find { it.type == "AutomaticAnswerSend" } != null
+        events.find { it.type == "AutomaticAnswerSend" }.body.contains("Suggested Article")
+        events.find { it.type == "KnowledgeRequested" } != null
+        events.find { it.type == "KnowledgeRequested" }.body.contains("Help Guide")
+        events.find { it.type == "UnknownCustomEvent" } != null
+    }
+
+
     static class ZendeskHttpHandler implements HttpHandler {
         @Override
         void handle(HttpExchange exchange) throws IOException {
@@ -275,6 +292,8 @@ class ZendeskIntegrationSpec extends Specification {
                 sendResponse(exchange, 200, '{"view_count":{"view_id":50,"value":42}}')
             } else if (path == "/api/v2/views/50/tickets.json") {
                 sendResponse(exchange, 200, '{"tickets":[{"id":1,"subject":"Ticket 1","requester_id":100}]}')
+            } else if (path == "/api/v2/tickets/123/audits") {
+                sendResponse(exchange, 200, '{"audits":[{"id":1,"ticket_id":123,"events":[{"id":10,"type":"AutomaticAnswerSend","body":[{"title":"Suggested Article"}]},{"id":11,"type":"KnowledgeRequested","body":{"topic":"Help Guide"}},{"id":12,"type":"UnknownCustomEvent","foo":"bar","body":"regular string"}]}],"count":1}')
             } else {
                 sendResponse(exchange, 404, '{"error":"RecordNotFound","description":"Not found: ' + path + '"}')
             }

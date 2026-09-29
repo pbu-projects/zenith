@@ -29,7 +29,9 @@ import lol.pbu.model.TicketMutationOptions
 import lol.pbu.model.TicketUpdateInputWithForm
 import lol.pbu.service.ZendeskMetadataService
 import lol.pbu.z4j.model.Ticket
+import lol.pbu.z4j.model.TicketAuditsResponse
 import lol.pbu.z4j.model.TicketForm
+import reactor.core.publisher.Mono
 import lol.pbu.z4j.model.TicketFormResponse
 import lol.pbu.z4j.model.TicketFormsResponse
 import lol.pbu.z4j.model.TicketCreateRequest
@@ -2399,6 +2401,56 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         resBulk != null
         resBulk.jobStatus != null
+    }
+
+    def "getTicketAudits validates ticketId and request parameters"() {
+        given:
+        def auditsResp = new TicketAuditsResponse(Collections.emptyList(), 0, null, null)
+        ticketClient.listAuditsForTicket(123L) >> Mono.just(auditsResp)
+
+        when: "ticketId is null"
+        tools.getTicketAudits(null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("ticketId must be a positive integer")
+
+        when: "ticketId is zero"
+        tools.getTicketAudits(0L)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("ticketId must be a positive integer")
+
+        when: "ticketId is negative"
+        tools.getTicketAudits(-10L)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("ticketId must be a positive integer")
+
+        when: "request has unrecognized parameters"
+        def badReq = new CallToolRequest("getTicketAudits", [ticketId: 123L, invalidParam: "foo"])
+        tools.getTicketAudits(123L, badReq)
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("Unrecognized parameter: 'invalidParam'")
+        e4.message.contains("The only valid parameter for getTicketAudits is 'ticketId'.")
+
+        when: "valid call with request"
+        def validReq = new CallToolRequest("getTicketAudits", [ticketId: 123L])
+        def resp = tools.getTicketAudits(123L, validReq)
+
+        then:
+        resp != null
+        resp.count == 0
+
+        when: "valid call without request"
+        def resp2 = tools.getTicketAudits(123L)
+
+        then:
+        resp2 != null
     }
 }
 

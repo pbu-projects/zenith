@@ -285,5 +285,39 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
         mcpError.message.contains("field1: Invalid field value")
         mcpError.message.contains("field2: Invalid simple value")
     }
+
+    def "includes cause chain in fallback diagnosis when cause is present"() {
+        given:
+        def cause = new IOException("Premature EOF in HTTP stream")
+        def ex = new HttpClientResponseException("The connector returned an error or an invalid response", cause, HttpResponse.status(HttpStatus.OK))
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32603
+        mcpError.message.toLowerCase().contains("the upstream zendesk api returned an error (200 ok)")
+        mcpError.message.contains("Caused by: IOException: Premature EOF in HTTP stream")
+    }
+
+    def "handles cyclic cause chains gracefully in fallback diagnosis"() {
+        given:
+        def cycleCause = new IOException("Cyclic network error") {
+            @Override
+            Throwable getCause() {
+                return this
+            }
+        }
+        def ex = new HttpClientResponseException("The connector returned an error or an invalid response", cycleCause, HttpResponse.status(HttpStatus.OK))
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32603
+        mcpError.message.contains("Cyclic network error")
+    }
 }
+
+
 
