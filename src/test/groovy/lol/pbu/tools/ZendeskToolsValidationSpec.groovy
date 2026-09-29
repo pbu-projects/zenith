@@ -1,5 +1,6 @@
 package lol.pbu.tools
 
+import io.micronaut.serde.ObjectMapper
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest
 import lol.pbu.z4j.client.ArticleClient
 import lol.pbu.z4j.client.AttachmentClient
@@ -19,10 +20,26 @@ import lol.pbu.z4j.model.JobStatusResponse
 import lol.pbu.z4j.model.LocaleAbbreviation
 import lol.pbu.z4j.model.SortArticleBy
 import lol.pbu.z4j.model.SortOrder
+import lol.pbu.client.CustomStatusClient
+import lol.pbu.model.CustomStatusesResponse
+import lol.pbu.model.CustomStatusResponse
+import lol.pbu.model.TicketFormStatus
+import lol.pbu.model.TicketFormStatusesResponse
+import lol.pbu.model.TicketMutationOptions
+import lol.pbu.model.TicketUpdateInputWithForm
+import lol.pbu.service.ZendeskMetadataService
 import lol.pbu.z4j.model.Ticket
+import lol.pbu.z4j.model.TicketForm
+import lol.pbu.z4j.model.TicketFormResponse
+import lol.pbu.z4j.model.TicketFormsResponse
 import lol.pbu.z4j.model.TicketCreateRequest
+import lol.pbu.z4j.model.TicketFieldCustomStatusObject
+import lol.pbu.z4j.model.TicketFieldCustomStatusObjectStatusCategory
 import lol.pbu.z4j.model.TicketResponse
+import lol.pbu.z4j.model.TicketStatus
 import lol.pbu.z4j.model.TicketType
+import lol.pbu.z4j.model.TicketUpdateInputPriority
+import lol.pbu.z4j.model.TicketUpdateInputStatus
 import lol.pbu.z4j.model.TicketUpdateInputType
 import lol.pbu.z4j.model.TicketUpdateRequest
 import lol.pbu.z4j.model.TicketUpdateResponse
@@ -34,6 +51,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     @TempDir
     Path tempDir
+
+    ObjectMapper objectMapper = ObjectMapper.getDefault()
 
     TicketClient ticketClient = Mock()
     SearchClient searchClient = Mock()
@@ -48,12 +67,13 @@ class ZendeskToolsValidationSpec extends Specification {
     TranslationClient translationClient = Mock()
     TopicClient topicClient = Mock()
     PostClient postClient = Mock()
+    CustomStatusClient customStatusClient = Mock()
 
     ZendeskTools tools = new ZendeskTools(
             ticketClient, searchClient, ticketFormsClient, customObjectsClient,
             customObjectRecordsClient, attachmentClient, jobStatusClient,
             viewClient, articleClient, categoryClient, translationClient,
-            topicClient, postClient
+            topicClient, postClient, customStatusClient
     )
 
     def "deleteArticle requires articleId and explicit confirmation"() {
@@ -405,6 +425,8 @@ class ZendeskToolsValidationSpec extends Specification {
         resp != null
         capturedReq != null
         capturedReq.ticket != null
+        capturedReq.ticket.subject == "Test Subject"
+        capturedReq.ticket.rawSubject == "Test Subject"
         capturedReq.ticket.customFields != null
         capturedReq.ticket.customFields.size() == 2
         capturedReq.ticket.customFields[0].id == 12345L
@@ -777,6 +799,51 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         def e2 = thrown(IllegalArgumentException)
         e2.message.contains("Either 'comment' or 'description' is required")
+    }
+
+    def "createTicket validates subject parameter"() {
+        when: "subject is null"
+        tools.createTicket(null, "Initial Comment", true, null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Ticket 'subject' is required and cannot be empty.")
+
+        when: "subject is empty or blank"
+        tools.createTicket("   ", "Initial Comment", true, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Ticket 'subject' is required and cannot be empty.")
+    }
+
+    def "createTicket populates both subject and rawSubject on TicketCreateInput and serializes properly"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        when:
+        def resp = tools.createTicket("Fix login bug", "User cannot login with SSO", true, "high", "open", null, null)
+
+        then:
+        resp != null
+        capturedReq != null
+        capturedReq.ticket != null
+        capturedReq.ticket.subject == "Fix login bug"
+        capturedReq.ticket.rawSubject == "Fix login bug"
+        capturedReq.ticket.comment.body == "User cannot login with SSO"
+        capturedReq.ticket.priority == TicketUpdateInputPriority.HIGH
+        capturedReq.ticket.status == TicketUpdateInputStatus.OPEN
+
+        when: "serialized to JSON"
+        def json = objectMapper.writeValueAsString(capturedReq)
+
+        then: "contains both subject and raw_subject fields for Zendesk API"
+        json.contains('"subject":"Fix login bug"')
+        json.contains('"raw_subject":"Fix login bug"')
     }
 
     def "parseCustomFields handles null elements and non-numeric IDs gracefully"() {
@@ -1282,6 +1349,1023 @@ class ZendeskToolsValidationSpec extends Specification {
         tokens[0] == "existing-token-abc"
         tokens[1] == "resolved-token-xyz"
     }
+
+    private List<TicketFieldCustomStatusObject> createSampleCustomStatuses() {
+        return [
+                new TicketFieldCustomStatusObject().tap {
+                    id = 101L
+                    agentLabel = "Open - In Progress"
+                    statusCategory = TicketFieldCustomStatusObjectStatusCategory.OPEN
+                    active = true
+                    isDefault = true
+                    description = "Ticket is being worked on"
+                },
+                new TicketFieldCustomStatusObject().tap {
+                    id = 102L
+                    agentLabel = "Waiting on Customer"
+                    statusCategory = TicketFieldCustomStatusObjectStatusCategory.PENDING
+                    active = true
+                    isDefault = false
+                    description = "Awaiting feedback"
+                },
+                new TicketFieldCustomStatusObject().tap {
+                    id = 103L
+                    agentLabel = "Legacy On Hold"
+                    statusCategory = TicketFieldCustomStatusObjectStatusCategory.HOLD
+                    active = false
+                    isDefault = false
+                    description = "Inactive status"
+                },
+                new TicketFieldCustomStatusObject().tap {
+                    id = 104L
+                    agentLabel = "Resolved & Verified"
+                    statusCategory = TicketFieldCustomStatusObjectStatusCategory.SOLVED
+                    active = true
+                    isDefault = true
+                }
+        ]
+    }
+
+    def "listCustomStatuses returns compact active-only summary by default to minimize tokens"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when: "calling default listCustomStatuses without args"
+        def result = tools.listCustomStatuses()
+
+        then: "only active statuses are returned in compact format"
+        result != null
+        result.containsKey("custom_statuses")
+        def list = (List<Map<String, Object>>) result.get("custom_statuses")
+        list.size() == 3
+        list.every { it.containsKey("id") && it.containsKey("agent_label") && it.containsKey("status_category") && it.containsKey("active") && it.containsKey("default") }
+        // Verify token-efficient projection (no URLs, audit fields, etc.)
+        list[0].id == 101L
+        list[0].agent_label == "Open - In Progress"
+        list[0].status_category == "open"
+        list[0].active == true
+        list[0].default == true
+        list[0].description == "Ticket is being worked on"
+        // Inactive status 103 must not be present
+        !list.any { it.id == 103L }
+    }
+
+    def "listCustomStatuses with includeInactive returns inactive statuses"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when:
+        def result = tools.listCustomStatuses(null, true, false)
+
+        then:
+        def list = (List<Map<String, Object>>) result.get("custom_statuses")
+        list.size() == 4
+        list.any { it.id == 103L && it.active == false }
+    }
+
+    def "listCustomStatuses with statusCategory filters by category"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when:
+        def result = tools.listCustomStatuses("pending", false, false)
+
+        then:
+        def list = (List<Map<String, Object>>) result.get("custom_statuses")
+        list.size() == 1
+        list[0].id == 102L
+        list[0].status_category == "pending"
+    }
+
+    def "listCustomStatuses with fullPayload returns full model objects"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when:
+        def result = tools.listCustomStatuses(null, false, true)
+
+        then:
+        def list = (List<TicketFieldCustomStatusObject>) result.get("custom_statuses")
+        list.size() == 3
+        list[0] instanceof TicketFieldCustomStatusObject
+        list[0].id == 101L
+    }
+
+    def "listCustomStatuses rejects invalid category and unknown parameters"() {
+        when: "invalid category is passed"
+        tools.listCustomStatuses("not_a_category", false, false)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Invalid status category: 'not_a_category'")
+
+        when: "unrecognized parameter is passed"
+        def badReq = new CallToolRequest("listCustomStatuses", [badParam: "val"])
+        tools.listCustomStatuses(null, false, false, badReq)
+
+        then:
+        thrown(IllegalArgumentException)
+    }
+
+    def "updateTicket sets customStatusId and status when both are provided with matching category"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+
+        when:
+        tools.updateTicket(100L, "Working on this", "open", "normal", true, null, null, null, null, null, null, null, 101L, null)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.status == TicketUpdateInputStatus.OPEN
+        capturedReq.ticket.customStatusId == 101
+    }
+
+    def "updateTicket accepts custom_status_id in snake_case via CallToolRequest"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+        def request = new CallToolRequest("updateTicket", [custom_status_id: 101L])
+
+        when:
+        tools.updateTicket(100L, null, "open", null, null, null, null, null, null, null, null, null, null, request)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.customStatusId == 101
+    }
+
+    def "updateTicket validates category match against current ticket when status is omitted"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket().tap {
+                id = 100L
+                status = TicketStatus.OPEN
+            }
+        })
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+
+        when: "customStatusId has category 'open' matching current ticket status"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, 101L, null)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.customStatusId == 101
+    }
+
+    def "updateTicket throws actionable error when status category mismatches provided status"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when: "customStatusId 101 has category 'open' but status is 'pending'"
+        tools.updateTicket(100L, null, "pending", null, null, null, null, null, null, null, null, null, 101L, null)
+
+        then: "descriptive error is thrown containing valid active custom statuses for 'pending'"
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("belongs to category 'open', which does not match status 'pending'")
+        e.message.contains("Valid active custom statuses for 'pending' are:")
+        e.message.contains("102: 'Waiting on Customer'")
+    }
+
+    def "updateTicket throws actionable error when category mismatches current ticket and status is omitted"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket().tap {
+                id = 100L
+                status = TicketStatus.OPEN
+            }
+        })
+
+        when: "customStatusId 102 has category 'pending' but ticket is 'open'"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, 102L, null)
+
+        then: "error instructs caller to provide the matching 'status' parameter"
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("belongs to category 'pending', but ticket #100 currently has status 'open'")
+        e.message.contains("you must also provide the matching 'status' parameter (status='pending')")
+    }
+
+    def "updateTicket throws error on inactive or non-existent customStatusId"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when: "customStatusId 103 is inactive"
+        tools.updateTicket(100L, null, "hold", null, null, null, null, null, null, null, null, null, 103L, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Custom status ID 103 ('Legacy On Hold') is inactive")
+
+        when: "customStatusId 999 does not exist"
+        tools.updateTicket(100L, null, "open", null, null, null, null, null, null, null, null, null, 999L, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Custom status ID 999 does not exist. Active custom statuses are:")
+        e2.message.contains("101: 'Open - In Progress'")
+    }
+
+    def "updateTicket throws error on invalid customStatusId bounds"() {
+        when: "customStatusId is <= 0"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, 0L, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customStatusId must be a positive integer, got: 0")
+
+        when: "customStatusId exceeds 32-bit Integer range"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, ((Long) Integer.MAX_VALUE) + 1L, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("exceeds 32-bit integer range")
+    }
+
+    def "batchUpdateTickets updates tickets with customStatusId in concurrent and bulk modes"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        List<TicketUpdateRequest> immediateReqs = []
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            immediateReqs.add(req)
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+        TicketUpdateRequest bulkReq = null
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            bulkReq = req
+            return reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+                jobStatus = new JobStatus().tap { id = "bulk-job-1" }
+            })
+        }
+
+        when: "batch updating in concurrent immediate mode"
+        def rImmediate = tools.batchUpdateTickets([100L, 101L], "Batch test", "open", "normal", true, null, null, false, null, null, null, null, null, 101L, null)
+
+        then:
+        rImmediate != null
+        rImmediate.results().size() == 2
+        immediateReqs.size() == 2
+        immediateReqs.every { it.ticket.customStatusId == 101 && it.ticket.status == TicketUpdateInputStatus.OPEN }
+
+        when: "batch updating in asyncBulk mode"
+        def rBulk = tools.batchUpdateTickets([100L, 101L], "Bulk test", "open", "normal", true, null, null, true, null, null, null, null, null, 101L, null)
+
+        then:
+        rBulk != null
+        rBulk.jobStatus().id == "bulk-job-1"
+        bulkReq != null
+        bulkReq.ticket.customStatusId == 101
+        bulkReq.ticket.status == TicketUpdateInputStatus.OPEN
+    }
+
+    def "createTicket sets customStatusId on TicketCreateInput"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        when:
+        tools.createTicket("New Ticket", "Initial comment", true, "normal", "open", null, null, null, null, null, 101L, null)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.status == TicketUpdateInputStatus.OPEN
+        capturedReq.ticket.customStatusId == 101
+    }
+
+    def "custom statuses are cached and do not re-fetch from client within TTL"() {
+        given:
+        1 * customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+
+        when: "multiple calls are made that require custom status lookup"
+        def r1 = tools.listCustomStatuses()
+        def r2 = tools.updateTicket(100L, null, "open", null, null, null, null, null, null, null, null, null, 101L, null)
+        def r3 = tools.listCustomStatuses("pending", false, false)
+
+        then: "client was only called once, and results were served from cache"
+        r1 != null
+        r2 != null
+        r3 != null
+    }
+
+    def "clearCustomStatusCache forces a re-fetch of custom statuses"() {
+        given:
+        2 * customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when: "calling listCustomStatuses, clearing cache, and calling again"
+        def r1 = tools.listCustomStatuses()
+        tools.clearCustomStatusCache()
+        def r2 = tools.listCustomStatuses()
+
+        then: "both calls succeed with client invoked twice"
+        r1 != null
+        r2 != null
+    }
+
+    def "stale cache is used if subsequent fetch fails"() {
+        given: "initial successful fetch populates cache"
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        tools.listCustomStatuses()
+
+        and: "subsequent fetch fails with an exception"
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.error(new RuntimeException("Zendesk 503 Service Unavailable"))
+
+        when: "force refreshing when client errors"
+        def cachedResult = tools.getCachedCustomStatuses(true)
+
+        then: "stale cache is returned gracefully instead of throwing"
+        cachedResult != null
+        cachedResult.size() == 4
+    }
+
+    List<TicketFormStatus> createSampleTicketFormStatuses() {
+        return [
+                new TicketFormStatus("assoc-1", 101L, 1001L),
+                new TicketFormStatus("assoc-2", 101L, 1002L),
+                new TicketFormStatus("assoc-3", 102L, 1001L),
+        ]
+    }
+
+    def "listCustomStatuses and listStatusCategories return status_categories grouped response with form context"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+
+        when: "calling listCustomStatuses"
+        def result = tools.listCustomStatuses()
+
+        then: "result contains both custom_statuses and status_categories grouped responses"
+        result.containsKey("custom_statuses")
+        result.containsKey("status_categories")
+
+        def customStatuses = (List<Map<String, Object>>) result.get("custom_statuses")
+        def status101 = customStatuses.find { it.id == 101L }
+        status101.ticket_form_ids == [1001L, 1002L]
+
+        def status104 = customStatuses.find { it.id == 104L }
+        status104.applies_to_all_forms == true
+
+        def categories = (Map<String, List<Map<String, Object>>>) result.get("status_categories")
+        categories.containsKey("open")
+        categories.containsKey("pending")
+        categories.containsKey("solved")
+
+        def openList = categories.get("open")
+        openList.size() == 1
+        openList[0].id == 101L
+        openList[0].ticket_form_ids == [1001L, 1002L]
+
+        when: "calling listStatusCategories alias"
+        def catResult = tools.listStatusCategories()
+
+        then: "produces identical categorized response"
+        catResult.status_categories == result.status_categories
+    }
+
+    def "listCustomStatuses with ticketFormId filters by form and preserves category defaults"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+
+        when: "filtering by ticketFormId 1002"
+        def result = tools.listCustomStatuses(null, 1002L, false, false)
+
+        then: "only custom statuses valid for form 1002 and category defaults are included"
+        result.ticket_form_id == 1002L
+        def list = (List<Map<String, Object>>) result.get("custom_statuses")
+        // 101 is associated with 1002
+        list.any { it.id == 101L }
+        // 102 is only associated with 1001, so must be excluded
+        !list.any { it.id == 102L }
+        // 104 is default for solved category, so must be included
+        list.any { it.id == 104L }
+
+        def categories = (Map<String, List<Map<String, Object>>>) result.get("status_categories")
+        categories.get("open").any { it.id == 101L }
+        categories.get("pending").isEmpty()
+        categories.get("solved").any { it.id == 104L }
+    }
+
+    def "updateTicket throws actionable error when customStatusId is not allowed on ticket's form"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket().tap {
+                id = 100L
+                status = TicketStatus.PENDING
+                ticketFormId = 1002L
+            }
+        })
+
+        when: "customStatusId 102 is only allowed on form 1001, but ticket has form 1002"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, 102L, null)
+
+        then: "actionable error lists the form mismatch and valid custom statuses for the form"
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Custom status ID 102 ('Waiting on Customer') cannot be used with ticket form #1002")
+    }
+
+    def "updateTicket succeeds when customStatusId matches ticket form"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket().tap {
+                id = 100L
+                status = TicketStatus.OPEN
+                ticketFormId = 1002L
+            }
+        })
+        TicketUpdateRequest captured = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            captured = req
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+
+        when: "customStatusId 101 is allowed on form 1002"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, 101L, null)
+
+        then:
+        captured != null
+        captured.ticket.customStatusId == 101
+    }
+
+    def "createTicket validates customStatusId against ticket_form_id"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        TicketCreateRequest captured = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            captured = req
+            return reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        when: "creating ticket with form 1002 and customStatusId 102 (which is only on 1001)"
+        def reqMismatched = new CallToolRequest("createTicket", [
+                subject: "Test",
+                comment: "Note",
+                isPublic: true,
+                ticket_form_id: 1002L,
+                custom_status_id: 102L,
+                status: "pending"
+        ])
+        tools.createTicket("Test", "Note", true, null, "pending", null, null, null, null, null, 102L, reqMismatched)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Custom status ID 102 ('Waiting on Customer') cannot be used with ticket form #1002")
+
+        when: "creating ticket with form 1001 and customStatusId 102 (which is valid for 1001)"
+        def reqValid = new CallToolRequest("createTicket", [
+                subject: "Test",
+                comment: "Note",
+                isPublic: true,
+                ticket_form_id: 1001L,
+                custom_status_id: 102L,
+                status: "pending"
+        ])
+        tools.createTicket("Test", "Note", true, null, "pending", null, null, null, null, null, 102L, reqValid)
+
+        then:
+        captured != null
+        captured.ticket.ticketFormId == 1001L
+        captured.ticket.customStatusId == 102
+    }
+
+    def "ticket form status cache is refreshed after clearCustomStatusCache"() {
+        given:
+        2 * customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        2 * customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+
+        when: "calling listCustomStatuses twice with clearCustomStatusCache in between"
+        tools.listCustomStatuses()
+        tools.clearCustomStatusCache()
+        tools.listCustomStatuses()
+
+        then: "ticket form statuses were fetched twice"
+        notThrown(Exception)
+    }
+
+    List<TicketForm> createSampleTicketForms() {
+        return [
+                new TicketForm().tap {
+                    id = 1001L
+                    name = "Standard Support Form"
+                    displayName = "Standard Support"
+                    active = true
+                    defaultForm = true
+                },
+                new TicketForm().tap {
+                    id = 1002L
+                    name = "Bug Report Form"
+                    displayName = "Bug Report"
+                    active = true
+                    defaultForm = false
+                },
+                new TicketForm().tap {
+                    id = 1003L
+                    name = "Legacy Form"
+                    displayName = "Legacy"
+                    active = false
+                    defaultForm = false
+                }
+        ]
+    }
+
+    def "updateTicket sets ticketFormId on TicketUpdateInputWithForm"() {
+        given:
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+
+        when: "calling updateTicket with ticketFormId"
+        tools.updateTicket(100L, "Switching to bug form", null, null, true, null, null, null, null, null, null, null, null, 1002L, null)
+
+        then: "captured request contains TicketUpdateInputWithForm with ticketFormId set"
+        capturedReq != null
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedReq.ticket).ticketFormId == 1002L
+
+        when: "calling updateTicket with snake_case ticket_form_id in CallToolRequest"
+        capturedReq = null
+        def req = new CallToolRequest("updateTicket", [ticket_form_id: 1001L])
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, null, null, req)
+
+        then: "ticket form id is resolved from snake_case request arguments"
+        capturedReq != null
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedReq.ticket).ticketFormId == 1001L
+    }
+
+    def "updateTicket validates ticketFormId bounds and active status"() {
+        given:
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        when: "ticketFormId is non-positive"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, null, -5L, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("ticketFormId must be a positive integer, got: -5")
+
+        when: "ticketFormId does not exist"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, null, 9999L, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Ticket form ID 9999 does not exist. Active ticket forms are: [1001: 'Standard Support Form'], [1002: 'Bug Report Form']")
+
+        when: "ticketFormId is inactive"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, null, 1003L, null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("Ticket form ID 1003 ('Legacy Form') is inactive.")
+    }
+
+    def "batchUpdateTickets sets ticketFormId in concurrent and bulk modes"() {
+        given:
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        TicketUpdateRequest capturedConcurrentReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedConcurrentReq = req
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+        TicketUpdateRequest capturedBulkReq = null
+        ticketClient.updateManyTickets("100", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            capturedBulkReq = req
+            return reactor.core.publisher.Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-form-1" }))
+        }
+
+        when: "running concurrent batch update with ticketFormId"
+        tools.batchUpdateTickets([100L], "Updated form", null, null, true, null, null, false, null, null, null, null, null, null, 1001L, null)
+
+        then: "concurrent ticket update input contains ticketFormId"
+        capturedConcurrentReq != null
+        capturedConcurrentReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedConcurrentReq.ticket).ticketFormId == 1001L
+
+        when: "running async bulk batch update with ticketFormId"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, null, null, null, null, null, null, 1002L, null)
+
+        then: "bulk ticket update input contains ticketFormId"
+        capturedBulkReq != null
+        capturedBulkReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedBulkReq.ticket).ticketFormId == 1002L
+    }
+
+    def "ticket forms are cached and refreshed via clearTicketFormCache and clearAllCaches"() {
+        given:
+        2 * ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        when: "calling listTicketForms multiple times without cache clearing"
+        tools.clearTicketFormCache()
+        def res1 = tools.listTicketForms()
+        def res2 = tools.listTicketForms()
+
+        then: "cached response is reused"
+        res1.ticket_forms.size() == 2 // 1001 and 1002 active
+        res2.ticket_forms.size() == 2
+
+        when: "clearing ticket form cache"
+        tools.clearTicketFormCache()
+        def res3 = tools.listTicketForms()
+
+        then: "client was invoked a second time"
+        res3.ticket_forms.size() == 2
+
+        when: "testing clearAllCaches clears both custom statuses and ticket forms"
+        tools.clearAllCaches()
+
+        then:
+        notThrown(Exception)
+    }
+
+    def "updateTicket using TicketMutationOptions builder updates ticket fields, form, and custom status"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        TicketUpdateRequest capturedReq = null
+        1 * ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long ticketIdArg, TicketUpdateRequest req ->
+            capturedReq = req
+            def t = new Ticket()
+            t.setId(ticketIdArg)
+            t.setStatus(TicketStatus.OPEN)
+            def resp = new TicketUpdateResponse()
+            resp.setTicket(t)
+            return reactor.core.publisher.Mono.just(resp)
+        }
+
+        def options = TicketMutationOptions.builder()
+                .comment("Updating via TicketMutationOptions builder")
+                .status("open")
+                .priority("high")
+                .isPublic(true)
+                .customStatusId(101L)
+                .ticketFormId(1001L)
+                .build()
+
+        when: "calling updateTicket with options"
+        def response = tools.updateTicket(12345L, options)
+
+        then:
+        response != null
+        response.ticket.id == 12345L
+        capturedReq != null
+        capturedReq.ticket.comment.body == "Updating via TicketMutationOptions builder"
+        capturedReq.ticket.status == TicketUpdateInputStatus.OPEN
+        capturedReq.ticket.priority == TicketUpdateInputPriority.HIGH
+        capturedReq.ticket.customStatusId == 101L
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedReq.ticket).ticketFormId == 1001L
+    }
+
+    def "batchUpdateTickets using TicketMutationOptions builder updates multiple tickets"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        List<TicketUpdateRequest> capturedRequests = []
+        2 * ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long ticketIdArg, TicketUpdateRequest req ->
+            capturedRequests.add(req)
+            def t = new Ticket()
+            t.setId(ticketIdArg)
+            t.setStatus(TicketStatus.OPEN)
+            def resp = new TicketUpdateResponse()
+            resp.setTicket(t)
+            return reactor.core.publisher.Mono.just(resp)
+        }
+
+        def options = TicketMutationOptions.builder()
+                .comment("Batch update via options builder")
+                .status("open")
+                .isPublic(false)
+                .customStatusId(101L)
+                .ticketFormId(1001L)
+                .build()
+
+        when: "calling batchUpdateTickets with options"
+        def response = tools.batchUpdateTickets([101L, 102L], options)
+
+        then:
+        response != null
+        response.results.size() == 2
+        response.results.every { it.success }
+        capturedRequests.size() == 2
+        capturedRequests.every { req ->
+            req.ticket instanceof TicketUpdateInputWithForm &&
+            ((TicketUpdateInputWithForm) req.ticket).ticketFormId == 1001L &&
+            req.ticket.customStatusId == 101L &&
+            req.ticket.comment.body == "Batch update via options builder" &&
+            req.ticket.comment.isPublic == false
+        }
+    }
+
+    def "constructors and getMetadataService initialize components properly"() {
+        when: "using 13-arg constructor"
+        def t1 = new ZendeskTools(
+                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
+                customObjectRecordsClient, attachmentClient, jobStatusClient,
+                viewClient, articleClient, categoryClient, translationClient,
+                topicClient, postClient
+        )
+        then:
+        t1.getMetadataService() != null
+
+        when: "using 14-arg constructor"
+        def t2 = new ZendeskTools(
+                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
+                customObjectRecordsClient, attachmentClient, jobStatusClient,
+                viewClient, articleClient, categoryClient, translationClient,
+                topicClient, postClient, customStatusClient
+        )
+        then:
+        t2.getMetadataService() != null
+
+        when: "using 15-arg constructor with explicit metadataService"
+        def explicitMeta = new ZendeskMetadataService(customStatusClient, ticketFormsClient)
+        def t3 = new ZendeskTools(
+                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
+                customObjectRecordsClient, attachmentClient, jobStatusClient,
+                viewClient, articleClient, categoryClient, translationClient,
+                topicClient, postClient, customStatusClient, explicitMeta
+        )
+        then:
+        t3.getMetadataService().is(explicitMeta)
+    }
+
+    def "getTicketForm validates input and delegates to ticketFormsClient"() {
+        given:
+        1 * ticketFormsClient.showTicketForm(1001L) >> reactor.core.publisher.Mono.just(new TicketFormResponse().tap {
+            ticketForm = new TicketForm().tap {
+                id = 1001L
+                name = "Standard Form"
+            }
+        })
+
+        when: "ticketFormId is null"
+        tools.getTicketForm(null)
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("ticketFormId is required")
+
+        when: "ticketFormId is invalid"
+        tools.getTicketForm(-1L)
+        then:
+        thrown(IllegalArgumentException)
+
+        when: "valid ticketFormId"
+        def resp = tools.getTicketForm(1001L)
+        then:
+        resp != null
+        resp.ticketForm.id == 1001L
+        resp.ticketForm.name == "Standard Form"
+    }
+
+    def "buildTicketUpdateInput overloads populate properties correctly"() {
+        when: "calling 6-arg buildInputFromParams"
+        def input1 = tools.buildInputFromParams("Comment 1", "open", "high", true, ["tok1"], [])
+        then:
+        input1.comment.body == "Comment 1"
+        input1.status == TicketUpdateInputStatus.OPEN
+        input1.priority == TicketUpdateInputPriority.HIGH
+        input1.comment.isPublic == true
+        input1.comment.uploads == ["tok1"]
+
+        when: "calling 10-arg buildTicketUpdateInput"
+        def input2 = tools.buildTicketUpdateInput("Comment 2", "pending", "normal", false, [], [], 999L, "incident", false, 101L)
+        then:
+        input2.status == TicketUpdateInputStatus.PENDING
+        input2.customStatusId == 101L
+        input2.type == TicketUpdateInputType.INCIDENT
+
+        when: "calling 9-arg buildTicketUpdateInput"
+        def input3 = tools.buildTicketUpdateInput("Comment 3", "solved", "low", true, [], [], 999L, "problem", false)
+        then:
+        input3.status == TicketUpdateInputStatus.SOLVED
+        input3.type == TicketUpdateInputType.PROBLEM
+        input3.customStatusId == null
+    }
+
+    def "updateTicket and batchUpdateTickets handle null options gracefully"() {
+        given:
+        1 * ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            def t = new Ticket().tap { it.id = id }
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+        }
+        1 * ticketClient.updateTicket(101L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            def t = new Ticket().tap { it.id = id }
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+        }
+
+        when: "updateTicket with null options"
+        def resp1 = tools.updateTicket(12345L, (TicketMutationOptions) null)
+        then:
+        resp1 != null
+        resp1.ticket.id == 12345L
+
+        when: "batchUpdateTickets with null options"
+        def resp2 = tools.batchUpdateTickets([101L], (TicketMutationOptions) null)
+        then:
+        resp2 != null
+        resp2.results.size() == 1
+    }
+
+    def "updateTicket positional overload delegates cleanly"() {
+        given:
+        1 * ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            def t = new Ticket().tap { it.id = id }
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+        }
+
+        when:
+        def resp = tools.updateTicket(12345L, "Positional comment", "open", "normal", true, null, null, null, false, null)
+
+        then:
+        resp != null
+        resp.ticket.id == 12345L
+    }
+
+    def "CallToolRequest string coercions and errors for custom_status_id and ticket_form_id"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            def t = new Ticket().tap { it.id = id }
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+        }
+
+        when: "custom_status_id is a valid numeric string in CallToolRequest"
+        def req1 = new CallToolRequest("updateTicket", ["custom_status_id": "101"])
+        def resp1 = tools.updateTicket(12345L, null, "open", null, null, null, null, null, null, null, null, null, null, req1)
+        then:
+        resp1 != null
+
+        when: "custom_status_id is non-numeric string in CallToolRequest"
+        def req2 = new CallToolRequest("updateTicket", ["custom_status_id": "abc"])
+        tools.updateTicket(12345L, null, "open", null, null, null, null, null, null, null, null, null, null, req2)
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("custom_status_id must be a numeric ID")
+
+        when: "ticket_form_id is a valid numeric string in CallToolRequest"
+        def req3 = new CallToolRequest("updateTicket", ["ticket_form_id": "1001"])
+        def resp3 = tools.updateTicket(12345L, null, null, null, null, null, null, null, null, null, null, null, null, req3)
+        then:
+        resp3 != null
+
+        when: "ticket_form_id is non-numeric string in CallToolRequest"
+        def req4 = new CallToolRequest("updateTicket", ["ticket_form_id": "xyz"])
+        tools.updateTicket(12345L, null, null, null, null, null, null, null, null, null, null, null, null, req4)
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("ticket_form_id must be a numeric ID")
+
+        when: "ticketFormId is a valid numeric string in CallToolRequest"
+        def req5 = new CallToolRequest("updateTicket", ["ticketFormId": "1001"])
+        def resp5 = tools.updateTicket(12345L, null, null, null, null, null, null, null, null, null, null, null, null, req5)
+        then:
+        resp5 != null
+
+        when: "ticketFormId is non-numeric string in CallToolRequest"
+        def req6 = new CallToolRequest("updateTicket", ["ticketFormId": "bad"])
+        tools.updateTicket(12345L, null, null, null, null, null, null, null, null, null, null, null, null, req6)
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("ticketFormId must be a numeric ID")
+    }
+
+    def "listCustomStatuses and listCustomStatusesForForm overloads and CallToolRequest parameter handling"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+
+        when: "calling 4-arg listCustomStatuses overload"
+        def res1 = tools.listCustomStatuses("open", false, false, (CallToolRequest) null)
+        then:
+        res1 != null
+        ((List) res1.get("custom_statuses")).size() == 1
+
+        when: "calling listStatusCategories with ticketFormId"
+        def res2 = tools.listStatusCategories(1001L)
+        then:
+        res2 != null
+        ((List) res2.get("custom_statuses")).size() == 3
+
+        when: "calling listCustomStatuses on tools without customStatusClient"
+        def toolsWithoutClient = new ZendeskTools(
+                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
+                customObjectRecordsClient, attachmentClient, jobStatusClient,
+                viewClient, articleClient, categoryClient, translationClient,
+                topicClient, postClient, null
+        )
+        def resEmptyClient = toolsWithoutClient.listCustomStatuses(null, null, false, false, null)
+        then:
+        resEmptyClient != null
+        ((List) resEmptyClient.get("custom_statuses")).isEmpty()
+        ((Map) resEmptyClient.get("status_categories")).isEmpty()
+
+        when: "calling listCustomStatuses with fullPayload=true and form statuses present"
+        def resFull = tools.listCustomStatuses(null, null, false, true, null)
+        then:
+        resFull.containsKey("ticket_form_statuses")
+        ((List) resFull.get("ticket_form_statuses")).size() == 3
+
+        when: "passing ticket_form_id in CallToolRequest as string, number, and unparseable"
+        def reqFormStr = new CallToolRequest("listCustomStatuses", ["ticket_form_id": "1002"])
+        def resFormStr = tools.listCustomStatuses(null, null, false, false, reqFormStr)
+        def reqFormNum = new CallToolRequest("listCustomStatuses", ["ticket_form_id": 1002L])
+        def resFormNum = tools.listCustomStatuses(null, null, false, false, reqFormNum)
+        def reqFormBad = new CallToolRequest("listCustomStatuses", ["ticket_form_id": "notanumber"])
+        def resFormBad = tools.listCustomStatuses(null, null, false, false, reqFormBad)
+
+        then:
+        resFormStr != null
+        resFormNum != null
+        resFormBad != null
+
+        when: "passing ticketFormId in CallToolRequest as string, number, and unparseable"
+        def reqCamelStr = new CallToolRequest("listCustomStatuses", ["ticketFormId": "1002"])
+        def resCamelStr = tools.listCustomStatuses(null, null, false, false, reqCamelStr)
+        def reqCamelNum = new CallToolRequest("listCustomStatuses", ["ticketFormId": 1002L])
+        def resCamelNum = tools.listCustomStatuses(null, null, false, false, reqCamelNum)
+        def reqCamelBad = new CallToolRequest("listCustomStatuses", ["ticketFormId": "notanumber"])
+        def resCamelBad = tools.listCustomStatuses(null, null, false, false, reqCamelBad)
+
+        then:
+        resCamelStr != null
+        resCamelNum != null
+        resCamelBad != null
+    }
+
+    def "batchUpdateTickets parses string IDs and validates customStatus category and form in bulk and concurrent modes"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+
+        ticketClient.showTicket(_ as Long) >> { Long id ->
+            def t = new Ticket().tap {
+                it.id = id
+                it.status = TicketStatus.OPEN
+                it.ticketFormId = 1001L
+            }
+            return reactor.core.publisher.Mono.just(new TicketResponse().tap { it.ticket = t })
+        }
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            def t = new Ticket().tap { it.id = id }
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+        }
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            return reactor.core.publisher.Mono.just(new JobStatusResponse(new JobStatus().tap { it.id = "job-batch-1" }))
+        }
+
+        when: "passing ticketIds as string representations in concurrent mode with customStatusId"
+        def opts = TicketMutationOptions.builder()
+                .customStatusId(101L) // category OPEN, matches currentTicket
+                .ticketFormId(1001L)
+                .build()
+        def resConcurrent = tools.batchUpdateTickets(["201", "202"] as List<Long>, opts, false, null)
+
+        then:
+        resConcurrent != null
+        resConcurrent.results.size() == 2
+
+        when: "bulk mode with customStatusId validating category match against current ticket and form"
+        def resBulk = tools.batchUpdateTickets([201L, 202L], opts, true, null)
+
+        then:
+        resBulk != null
+        resBulk.jobStatus != null
+    }
 }
+
+
 
 

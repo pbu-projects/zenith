@@ -360,7 +360,7 @@ class ZendeskMcpClientSpec extends Specification {
 
     def "16. Test createTicket requires isPublic"() {
         when: "client provides a comment but omits isPublic"
-        def result = mcpClient.callTool(new io.modelcontextprotocol.spec.McpSchema.CallToolRequest("createTicket", [
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("createTicket", [
                 subject: "Test missing isPublic",
                 comment: "This should fail because isPublic is missing"
         ]))
@@ -368,6 +368,20 @@ class ZendeskMcpClientSpec extends Specification {
         then: "it fails requiring isPublic"
         result != null
         Boolean.TRUE.equals(result.isError())
+    }
+
+    def "16b. Test createTicket requires non-blank subject"() {
+        when: "client provides blank subject"
+        mcpClient.callTool(new McpSchema.CallToolRequest("createTicket", [
+                subject: "   ",
+                comment: "This should fail because subject is blank",
+                isPublic: true
+        ]))
+
+        then: "it fails validation"
+        def e = thrown(McpError)
+        e.jsonRpcError.code == -32602
+        e.message.contains("Ticket 'subject' is required and cannot be empty")
     }
 
     def "17. Test batchUpdateTickets requires isPublic when comment is provided"() {
