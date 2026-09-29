@@ -21,6 +21,8 @@ import io.micronaut.core.annotation.Nullable;
 import io.micronaut.serde.annotation.Serdeable;
 import lol.pbu.z4j.model.TicketUpdateInput;
 
+import java.util.Objects;
+
 /**
  * Extension of {@link TicketUpdateInput} that includes the optional {@code ticket_form_id}
  * attribute for changing the ticket form during ticket update and batch update operations.
@@ -59,12 +61,12 @@ public class TicketUpdateInputWithForm extends TicketUpdateInput {
         if (this == o) return true;
         if (!(o instanceof TicketUpdateInputWithForm that)) return false;
         if (!super.equals(o)) return false;
-        return java.util.Objects.equals(ticketFormId, that.ticketFormId);
+        return Objects.equals(ticketFormId, that.ticketFormId);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), ticketFormId);
+        return Objects.hash(super.hashCode(), ticketFormId);
     }
 
     @Override

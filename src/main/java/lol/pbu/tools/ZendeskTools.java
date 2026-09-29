@@ -5,6 +5,7 @@ import io.micronaut.core.util.StringUtils;
 import io.micronaut.http.MediaType;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lol.pbu.client.CustomStatusClient;
 import lol.pbu.model.BatchUpdateResponse;
@@ -116,7 +117,7 @@ public class ZendeskTools {
         this(ticketClient, searchClient, ticketFormsClient, customObjectsClient, customObjectRecordsClient, attachmentClient, jobStatusClient, viewClient, articleClient, categoryClient, translationClient, topicClient, postClient, customStatusClient, null);
     }
 
-    @jakarta.inject.Inject
+    @Inject
     public ZendeskTools(
             TicketClient ticketClient,
             SearchClient searchClient,
@@ -1229,7 +1230,7 @@ public class ZendeskTools {
                 input.setType(TicketUpdateInputType.INCIDENT);
             }
 
-            List<lol.pbu.z4j.model.JobStatus> jobStatuses = new java.util.ArrayList<>();
+            List<JobStatus> jobStatuses = new ArrayList<>();
             for (int i = 0; i < distinctIds.size(); i += 100) {
                 List<Long> chunk = distinctIds.subList(i, Math.min(distinctIds.size(), i + 100));
                 String idsStr = chunk.stream().map(Object::toString).collect(Collectors.joining(","));

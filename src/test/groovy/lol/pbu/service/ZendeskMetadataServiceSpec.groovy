@@ -272,4 +272,311 @@ class ZendeskMetadataServiceSpec extends Specification {
         def e = thrown(IllegalArgumentException)
         e.message.contains("belongs to category 'open', but ticket #555 currently has status 'pending'")
     }
+
+    def "null client guards return empty collections or null validation"() {
+        given:
+        def nullService = new ZendeskMetadataService(null, null)
+
+        expect:
+        nullService.getCachedCustomStatuses(false) == []
+        nullService.getCachedTicketFormStatuses(false) == []
+        nullService.getCachedTicketForms(false) == []
+        nullService.validateTicketForm(1001L) == null
+        nullService.validateCustomStatus(101L, "open") == null
+    }
+
+    def "clearCustomStatusCache clears custom status cache and forces refresh"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >>> [
+                Mono.just(new CustomStatusesResponse(createSampleCustomStatuses())),
+                Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        ]
+
+        when:
+        def list1 = service.getCachedCustomStatuses(false)
+        service.clearCustomStatusCache()
+        def list2 = service.getCachedCustomStatuses(false)
+
+        then:
+        list1.size() == 4
+        list2.size() == 4
+        !list1.is(list2)
+    }
+
+    def "getCachedCustomStatuses handles null response or null list payload"() {
+        when: "response is null"
+        customStatusClient.listCustomStatuses(null, null) >> Mono.empty()
+        def resNull = service.getCachedCustomStatuses(true)
+
+        then:
+        resNull == []
+
+        when: "response has null customStatuses"
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(null))
+        def resNullList = service.getCachedCustomStatuses(true)
+
+        then:
+        resNullList == []
+    }
+
+    def "getCachedTicketFormStatuses caches result and subsequent calls return cached copy"() {
+        given:
+        customStatusClient.listTicketFormStatuses(null) >>> [
+                Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses())),
+                Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ]
+
+        when: "fetching for first time and re-fetching from cache"
+        def first = service.getCachedTicketFormStatuses(false)
+        def second = service.getCachedTicketFormStatuses(false)
+
+        then: "cached result is reused"
+        first.size() == 3
+        second.size() == 3
+        first.is(second)
+
+        when: "force refreshing"
+        def third = service.getCachedTicketFormStatuses(true)
+
+        then:
+        third.size() == 3
+    }
+
+    def "getCachedTicketFormStatuses handles null response or null list payload"() {
+        when: "response is null"
+        customStatusClient.listTicketFormStatuses(null) >> Mono.empty()
+        def resNull = service.getCachedTicketFormStatuses(true)
+
+        then:
+        resNull == []
+
+        when: "response has null list"
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(null))
+        def resNullList = service.getCachedTicketFormStatuses(true)
+
+        then:
+        resNullList == []
+    }
+
+    def "getCachedTicketFormStatuses returns stale cache when client fails after successful fetch"() {
+        given:
+        customStatusClient.listTicketFormStatuses(null) >>> [
+                Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses())),
+                Mono.error(new RuntimeException("Flaky network"))
+        ]
+        service.getCachedTicketFormStatuses(false)
+
+        when: "force refresh errors"
+        def stale = service.getCachedTicketFormStatuses(true)
+
+        then:
+        stale.size() == 3
+    }
+
+    def "getCachedTicketFormStatuses returns empty list when client fails and no cache exists"() {
+        given:
+        customStatusClient.listTicketFormStatuses(null) >> Mono.error(new RuntimeException("Permanent error"))
+
+        when:
+        def res = service.getCachedTicketFormStatuses(false)
+
+        then:
+        res == []
+    }
+
+    def "getCachedTicketForms handles null response or null list payload"() {
+        when: "response is null"
+        ticketFormsClient.listTicketForms() >> Mono.empty()
+        def resNull = service.getCachedTicketForms(true)
+
+        then:
+        resNull == []
+
+        when: "response has null list"
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(null))
+        def resNullList = service.getCachedTicketForms(true)
+
+        then:
+        resNullList == []
+    }
+
+    def "getCachedTicketForms returns stale cache when client fails after successful fetch"() {
+        given:
+        ticketFormsClient.listTicketForms() >>> [
+                Mono.just(new TicketFormsResponse(createSampleTicketForms())),
+                Mono.error(new RuntimeException("API error"))
+        ]
+        service.getCachedTicketForms(false)
+
+        when: "force refresh errors"
+        def stale = service.getCachedTicketForms(true)
+
+        then:
+        stale.size() == 3
+    }
+
+    def "getCachedTicketForms returns empty list when client fails and no cache exists"() {
+        given:
+        ticketFormsClient.listTicketForms() >> Mono.error(new RuntimeException("API error"))
+
+        when:
+        def res = service.getCachedTicketForms(false)
+
+        then:
+        res == []
+    }
+
+    def "validateTicketForm returns null when forms catalog is empty"() {
+        given:
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse([]))
+
+        expect:
+        service.validateTicketForm(1001L) == null
+    }
+
+    def "validateTicketForm throws when form not found and no active forms exist"() {
+        given:
+        def inactiveOnly = [
+                new TicketForm().tap {
+                    id = 99L
+                    name = "Inactive"
+                    active = false
+                }
+        ]
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(inactiveOnly))
+
+        when:
+        service.validateTicketForm(1001L)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Active ticket forms are: none")
+    }
+
+    def "validateCustomStatus throws when custom statuses catalog is empty"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse([]))
+
+        when:
+        service.validateCustomStatus(101L, "open")
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("No custom statuses found for this Zendesk account")
+    }
+
+    def "validateCustomStatus throws when status not found and no active statuses exist"() {
+        given:
+        def inactiveOnly = [
+                new TicketFieldCustomStatusObject().tap {
+                    id = 99L
+                    agentLabel = "Old Inactive"
+                    active = false
+                    statusCategory = TicketFieldCustomStatusObjectStatusCategory.OPEN
+                }
+        ]
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(inactiveOnly))
+
+        when:
+        service.validateCustomStatus(101L, null)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Active custom statuses are: none")
+    }
+
+    def "validateCustomStatus succeeds with null or blank targetStatus"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        expect:
+        service.validateCustomStatus(101L, null).id == 101L
+        service.validateCustomStatus(101L, "").id == 101L
+    }
+
+    def "validateCustomStatus throws with category mismatch when no active statuses exist in target category"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+
+        when:
+        service.validateCustomStatus(101L, "solved")
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Valid active custom statuses for 'solved' are: none")
+    }
+
+    def "validateTicketCustomStatusCategoryMatch handles null inputs and null categories"() {
+        given:
+        def sampleStatus = createSampleCustomStatuses()[0]
+        def sampleTicket = new Ticket().tap {
+            id = 123L
+            status = TicketStatus.OPEN
+        }
+
+        expect:
+        service.validateTicketCustomStatusCategoryMatch(123L, null, sampleStatus, 101L) == null
+        service.validateTicketCustomStatusCategoryMatch(123L, sampleTicket, null, 101L) == null
+        service.validateTicketCustomStatusCategoryMatch(123L, new Ticket().tap { id = 123L }, sampleStatus, 101L) == null
+        service.validateTicketCustomStatusCategoryMatch(123L, sampleTicket, new TicketFieldCustomStatusObject().tap { id = 101L }, 101L) == null
+    }
+
+    def "validateCustomStatusForForm handles null inputs"() {
+        given:
+        def sampleStatus = createSampleCustomStatuses()[0]
+
+        when:
+        service.validateCustomStatusForForm(null, 1001L)
+        service.validateCustomStatusForForm(sampleStatus, null)
+
+        then:
+        notThrown(Exception)
+    }
+
+    def "validateCustomStatusForForm handles empty form statuses catalog"() {
+        given:
+        def sampleStatus = createSampleCustomStatuses()[0]
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse([]))
+
+        when:
+        service.validateCustomStatusForForm(sampleStatus, 1001L)
+
+        then:
+        notThrown(Exception)
+    }
+
+    def "validateCustomStatusForForm handles form without specific statuses configured"() {
+        given:
+        def sampleStatus = createSampleCustomStatuses()[0]
+        def statusesForOtherFormOnly = [new TicketFormStatus("assoc-99", 101L, 9999L)]
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(statusesForOtherFormOnly))
+
+        when:
+        service.validateCustomStatusForForm(sampleStatus, 1001L)
+
+        then:
+        notThrown(Exception)
+    }
+
+    def "validateCustomStatusForForm throws when status is not allowed and status has null category"() {
+        given:
+        def statusNoCat = new TicketFieldCustomStatusObject().tap {
+            id = 200L
+            agentLabel = "No Category Status"
+            active = true
+            isDefault = false
+        }
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse([statusNoCat]))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse([
+                new TicketFormStatus("assoc-1", 101L, 1001L)
+        ]))
+
+        when:
+        service.validateCustomStatusForForm(statusNoCat, 1001L)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Custom status ID 200 ('No Category Status') cannot be used with ticket form #1001")
+        !e.message.contains("under category")
+    }
 }
