@@ -334,12 +334,17 @@ public class ZendeskTools {
         if (isPublic == null) {
             throw new IllegalArgumentException("isPublic is required when creating a ticket. Set to true for a public initial comment, or false for an internal note.");
         }
+        if (StringUtils.isEmpty(subject) || subject.isBlank()) {
+            throw new IllegalArgumentException("Ticket 'subject' is required and cannot be empty.");
+        }
+
         TicketComment ticketComment = new TicketComment().setBody(initialComment);
         ticketComment.setIsPublic(isPublic);
         if (!tokens.isEmpty()) {
             ticketComment.setUploads(tokens);
         }
         TicketCreateInput input = new TicketCreateInput(ticketComment);
+        input.setSubject(subject);
         input.setRawSubject(subject);
 
         if (StringUtils.isNotEmpty(priority)) {

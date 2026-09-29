@@ -1,5 +1,6 @@
 package lol.pbu.tools
 
+import io.micronaut.serde.ObjectMapper
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest
 import lol.pbu.z4j.client.ArticleClient
 import lol.pbu.z4j.client.AttachmentClient
@@ -50,6 +51,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     @TempDir
     Path tempDir
+
+    ObjectMapper objectMapper = ObjectMapper.getDefault()
 
     TicketClient ticketClient = Mock()
     SearchClient searchClient = Mock()
@@ -422,6 +425,8 @@ class ZendeskToolsValidationSpec extends Specification {
         resp != null
         capturedReq != null
         capturedReq.ticket != null
+        capturedReq.ticket.subject == "Test Subject"
+        capturedReq.ticket.rawSubject == "Test Subject"
         capturedReq.ticket.customFields != null
         capturedReq.ticket.customFields.size() == 2
         capturedReq.ticket.customFields[0].id == 12345L
@@ -794,6 +799,51 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         def e2 = thrown(IllegalArgumentException)
         e2.message.contains("Either 'comment' or 'description' is required")
+    }
+
+    def "createTicket validates subject parameter"() {
+        when: "subject is null"
+        tools.createTicket(null, "Initial Comment", true, null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Ticket 'subject' is required and cannot be empty.")
+
+        when: "subject is empty or blank"
+        tools.createTicket("   ", "Initial Comment", true, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Ticket 'subject' is required and cannot be empty.")
+    }
+
+    def "createTicket populates both subject and rawSubject on TicketCreateInput and serializes properly"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        when:
+        def resp = tools.createTicket("Fix login bug", "User cannot login with SSO", true, "high", "open", null, null)
+
+        then:
+        resp != null
+        capturedReq != null
+        capturedReq.ticket != null
+        capturedReq.ticket.subject == "Fix login bug"
+        capturedReq.ticket.rawSubject == "Fix login bug"
+        capturedReq.ticket.comment.body == "User cannot login with SSO"
+        capturedReq.ticket.priority == TicketUpdateInputPriority.HIGH
+        capturedReq.ticket.status == TicketUpdateInputStatus.OPEN
+
+        when: "serialized to JSON"
+        def json = objectMapper.writeValueAsString(capturedReq)
+
+        then: "contains both subject and raw_subject fields for Zendesk API"
+        json.contains('"subject":"Fix login bug"')
+        json.contains('"raw_subject":"Fix login bug"')
     }
 
     def "parseCustomFields handles null elements and non-numeric IDs gracefully"() {
