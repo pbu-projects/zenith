@@ -47,6 +47,46 @@ import spock.lang.Specification
 import spock.lang.TempDir
 import java.nio.file.Path
 
+class ToolsComposite {
+    @Delegate ZendeskTicketTools ticketTools
+    @Delegate ZendeskSearchTools searchTools
+    @Delegate ZendeskViewTools viewTools
+    @Delegate ZendeskHelpCenterTools helpCenterTools
+    @Delegate ZendeskCommunityTools communityTools
+    @Delegate ZendeskCustomObjectTools customObjectTools
+    @Delegate ZendeskMetadataTools metadataTools
+
+    def methodMissing(String name, args) {
+        def targets = [ticketTools, searchTools, viewTools, helpCenterTools, communityTools, customObjectTools, metadataTools]
+        for (target in targets) {
+            if (target == null) {
+                continue
+            }
+            try {
+                return target.invokeMethod(name, args)
+            } catch (MissingMethodException _) {
+                // Expected when method is not declared on this delegate; try next delegate
+            }
+        }
+        throw new MissingMethodException(name, ToolsComposite, args as Object[])
+    }
+
+    def propertyMissing(String name) {
+        def targets = [ticketTools, searchTools, viewTools, helpCenterTools, communityTools, customObjectTools, metadataTools]
+        for (target in targets) {
+            if (target == null) {
+                continue
+            }
+            try {
+                return target."$name"
+            } catch (MissingPropertyException _) {
+                // Expected when property is not declared on this delegate; try next delegate
+            }
+        }
+        throw new MissingPropertyException(name, ToolsComposite)
+    }
+}
+
 class ZendeskToolsValidationSpec extends Specification {
 
     @TempDir
@@ -69,12 +109,36 @@ class ZendeskToolsValidationSpec extends Specification {
     PostClient postClient = Mock()
     CustomStatusClient customStatusClient = Mock()
 
-    ZendeskTools tools = new ZendeskTools(
-            ticketClient, searchClient, ticketFormsClient, customObjectsClient,
-            customObjectRecordsClient, attachmentClient, jobStatusClient,
-            viewClient, articleClient, categoryClient, translationClient,
-            topicClient, postClient, customStatusClient
-    )
+    ZendeskTicketTools ticketTools
+    ZendeskSearchTools searchTools
+    ZendeskViewTools viewTools
+    ZendeskHelpCenterTools helpCenterTools
+    ZendeskCommunityTools communityTools
+    ZendeskCustomObjectTools customObjectTools
+    ZendeskMetadataTools metadataTools
+    ZendeskMetadataService metadataService
+
+    ToolsComposite tools
+
+    def setup() {
+        metadataService = new ZendeskMetadataService(customStatusClient, ticketFormsClient)
+        ticketTools = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService)
+        searchTools = new ZendeskSearchTools(searchClient)
+        viewTools = new ZendeskViewTools(viewClient)
+        helpCenterTools = new ZendeskHelpCenterTools(articleClient, categoryClient, translationClient)
+        communityTools = new ZendeskCommunityTools(topicClient, postClient)
+        customObjectTools = new ZendeskCustomObjectTools(customObjectsClient, customObjectRecordsClient)
+        metadataTools = new ZendeskMetadataTools(metadataService, ticketFormsClient, customStatusClient)
+        tools = new ToolsComposite(
+                ticketTools: ticketTools,
+                searchTools: searchTools,
+                viewTools: viewTools,
+                helpCenterTools: helpCenterTools,
+                communityTools: communityTools,
+                customObjectTools: customObjectTools,
+                metadataTools: metadataTools
+        )
+    }
 
     def "deleteArticle requires articleId and explicit confirmation"() {
         when: "articleId is null"
@@ -2085,37 +2149,10 @@ class ZendeskToolsValidationSpec extends Specification {
         }
     }
 
-    def "constructors and getMetadataService initialize components properly"() {
-        when: "using 13-arg constructor"
-        def t1 = new ZendeskTools(
-                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
-                customObjectRecordsClient, attachmentClient, jobStatusClient,
-                viewClient, articleClient, categoryClient, translationClient,
-                topicClient, postClient
-        )
-        then:
-        t1.getMetadataService() != null
-
-        when: "using 14-arg constructor"
-        def t2 = new ZendeskTools(
-                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
-                customObjectRecordsClient, attachmentClient, jobStatusClient,
-                viewClient, articleClient, categoryClient, translationClient,
-                topicClient, postClient, customStatusClient
-        )
-        then:
-        t2.getMetadataService() != null
-
-        when: "using 15-arg constructor with explicit metadataService"
-        def explicitMeta = new ZendeskMetadataService(customStatusClient, ticketFormsClient)
-        def t3 = new ZendeskTools(
-                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
-                customObjectRecordsClient, attachmentClient, jobStatusClient,
-                viewClient, articleClient, categoryClient, translationClient,
-                topicClient, postClient, customStatusClient, explicitMeta
-        )
-        then:
-        t3.getMetadataService().is(explicitMeta)
+    def "getMetadataService returns initialized metadataService"() {
+        expect:
+        ticketTools.getMetadataService() != null
+        ticketTools.getMetadataService().is(metadataService)
     }
 
     def "getTicketForm validates input and delegates to ticketFormsClient"() {
@@ -2278,14 +2315,13 @@ class ZendeskToolsValidationSpec extends Specification {
         res2 != null
         ((List) res2.get("custom_statuses")).size() == 3
 
-        when: "calling listCustomStatuses on tools without customStatusClient"
-        def toolsWithoutClient = new ZendeskTools(
-                ticketClient, searchClient, ticketFormsClient, customObjectsClient,
-                customObjectRecordsClient, attachmentClient, jobStatusClient,
-                viewClient, articleClient, categoryClient, translationClient,
-                topicClient, postClient, null
+        when: "calling listCustomStatuses on metadataTools without customStatusClient"
+        def metaWithoutClient = new ZendeskMetadataTools(
+                new ZendeskMetadataService(null, ticketFormsClient),
+                ticketFormsClient,
+                null
         )
-        def resEmptyClient = toolsWithoutClient.listCustomStatuses(null, null, false, false, null)
+        def resEmptyClient = metaWithoutClient.listCustomStatuses(null, null, false, false, null)
         then:
         resEmptyClient != null
         ((List) resEmptyClient.get("custom_statuses")).isEmpty()

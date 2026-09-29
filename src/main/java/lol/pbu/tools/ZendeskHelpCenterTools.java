@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Set;
 
 @Singleton
+@SuppressWarnings("java:S107")
 public class ZendeskHelpCenterTools {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskHelpCenterTools.class);

@@ -8,6 +8,10 @@ import java.util.Set;
 
 public final class ToolValidationSupport {
 
+    public static final String PARAM_CUSTOM_STATUS_ID_SNAKE = "custom_status_id";
+    public static final String PARAM_TICKET_FORM_ID_SNAKE = "ticket_form_id";
+    public static final String PARAM_TICKET_FORM_ID_CAMEL = "ticketFormId";
+
     private ToolValidationSupport() {}
 
     public static void validateKnownParameters(CallToolRequest request, String toolName, String... knownParams) {
@@ -35,23 +39,16 @@ public final class ToolValidationSupport {
         if (customStatusId != null) {
             return customStatusId;
         }
-        if (request != null && request.arguments() != null && request.arguments().containsKey("custom_status_id")) {
-            Object val = request.arguments().get("custom_status_id");
-            if (val instanceof Number num) {
-                return num.longValue();
-            } else if (val != null) {
-                try {
-                    return Long.parseLong(val.toString().trim());
-                } catch (NumberFormatException _) {
-                    throw new IllegalArgumentException("custom_status_id must be a numeric ID, got: " + val);
-                }
-            }
+        if (request != null && request.arguments() != null && request.arguments().containsKey(PARAM_CUSTOM_STATUS_ID_SNAKE)) {
+            return parseLongArgument(request.arguments().get(PARAM_CUSTOM_STATUS_ID_SNAKE), PARAM_CUSTOM_STATUS_ID_SNAKE);
         }
         return null;
     }
 
     public static void validateCustomStatusBounds(Long customStatusId) {
-        if (customStatusId == null) return;
+        if (customStatusId == null) {
+            return;
+        }
         if (customStatusId <= 0) {
             throw new IllegalArgumentException("customStatusId must be a positive integer, got: " + customStatusId);
         }
@@ -65,28 +62,24 @@ public final class ToolValidationSupport {
             return ticketFormId;
         }
         if (request != null && request.arguments() != null) {
-            if (request.arguments().containsKey("ticket_form_id")) {
-                Object val = request.arguments().get("ticket_form_id");
-                if (val instanceof Number num) {
-                    return num.longValue();
-                } else if (val != null) {
-                    try {
-                        return Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {
-                        throw new IllegalArgumentException("ticket_form_id must be a numeric ID, got: " + val);
-                    }
-                }
-            } else if (request.arguments().containsKey("ticketFormId")) {
-                Object val = request.arguments().get("ticketFormId");
-                if (val instanceof Number num) {
-                    return num.longValue();
-                } else if (val != null) {
-                    try {
-                        return Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {
-                        throw new IllegalArgumentException("ticketFormId must be a numeric ID, got: " + val);
-                    }
-                }
+            if (request.arguments().containsKey(PARAM_TICKET_FORM_ID_SNAKE)) {
+                return parseLongArgument(request.arguments().get(PARAM_TICKET_FORM_ID_SNAKE), PARAM_TICKET_FORM_ID_SNAKE);
+            }
+            if (request.arguments().containsKey(PARAM_TICKET_FORM_ID_CAMEL)) {
+                return parseLongArgument(request.arguments().get(PARAM_TICKET_FORM_ID_CAMEL), PARAM_TICKET_FORM_ID_CAMEL);
+            }
+        }
+        return null;
+    }
+
+    private static Long parseLongArgument(Object val, String paramName) {
+        if (val instanceof Number num) {
+            return num.longValue();
+        } else if (val != null) {
+            try {
+                return Long.parseLong(val.toString().trim());
+            } catch (NumberFormatException _) {
+                throw new IllegalArgumentException(paramName + " must be a numeric ID, got: " + val);
             }
         }
         return null;

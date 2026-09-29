@@ -4,7 +4,7 @@ import io.micronaut.test.annotation.MockBean
 import io.micronaut.test.extensions.spock.annotation.MicronautTest
 import spock.lang.Specification
 import jakarta.inject.Inject
-import lol.pbu.tools.ZendeskTools
+import lol.pbu.tools.ZendeskTicketTools
 import lol.pbu.z4j.client.TicketClient
 import reactor.core.publisher.Mono
 
@@ -12,7 +12,7 @@ import reactor.core.publisher.Mono
 class GetTicketsMockErrorSpec extends Specification {
 
     @Inject
-    ZendeskTools zendeskTools
+    ZendeskTicketTools zendeskTools
 
     @Inject
     TicketClient ticketClient
