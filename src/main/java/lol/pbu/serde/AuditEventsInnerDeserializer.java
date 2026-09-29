@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.StreamSupport;
 
 @Singleton
 public class AuditEventsInnerDeserializer implements Deserializer<AuditEventsInner> {
@@ -45,7 +46,7 @@ public class AuditEventsInnerDeserializer implements Deserializer<AuditEventsInn
             @NonNull Argument<? super AuditEventsInner> type
     ) throws IOException {
         JsonNode node = decoder.decodeNode();
-        if (node == null || node.isNull() || !node.isObject()) {
+        if (node.isNull() || !node.isObject()) {
             return null;
         }
 
@@ -104,8 +105,7 @@ public class AuditEventsInnerDeserializer implements Deserializer<AuditEventsInn
                 if (mapper != null) {
                     event.setBody(mapper.writeValueAsString(bodyNode));
                 } else {
-                    String str = bodyNode.coerceStringValue();
-                    event.setBody(str != null ? str : bodyNode.toString());
+                    event.setBody(bodyNode.coerceStringValue());
                 }
             }
         }
@@ -189,11 +189,9 @@ public class AuditEventsInnerDeserializer implements Deserializer<AuditEventsInn
             return node.getNumberValue();
         }
         if (node.isArray()) {
-            List<Object> list = new ArrayList<>();
-            for (JsonNode child : node.values()) {
-                list.add(extractArbitraryValue(child));
-            }
-            return list;
+            return StreamSupport.stream(node.values().spliterator(), false)
+                    .map(this::extractArbitraryValue)
+                    .toList();
         }
         if (node.isObject()) {
             Map<String, Object> map = new LinkedHashMap<>();
@@ -202,7 +200,6 @@ public class AuditEventsInnerDeserializer implements Deserializer<AuditEventsInn
             }
             return map;
         }
-        String str = node.coerceStringValue();
-        return str != null ? str : node.toString();
+        return node.coerceStringValue();
     }
 }

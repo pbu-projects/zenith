@@ -22,7 +22,6 @@ import lol.pbu.z4j.model.SortArticleBy
 import lol.pbu.z4j.model.SortOrder
 import lol.pbu.client.CustomStatusClient
 import lol.pbu.model.CustomStatusesResponse
-import lol.pbu.model.CustomStatusResponse
 import lol.pbu.model.TicketFormStatus
 import lol.pbu.model.TicketFormStatusesResponse
 import lol.pbu.model.TicketMutationOptions

@@ -59,13 +59,10 @@ public class ZendeskSearchTools {
         int page = 1;
         while (hasMore && accumulatedResponse.getResults().size() < limit) {
             SearchResponse pageResponse = searchClient.list(query, resolvedInclude, null, null, page, 100).block();
-            if (pageResponse == null || pageResponse.getResults() == null || pageResponse.getResults().isEmpty()) {
+            if (isPageEmpty(pageResponse)) {
                 hasMore = false;
             } else {
-                accumulatedResponse.getResults().addAll(pageResponse.getResults());
-                if (pageResponse.getUsers() != null) accumulatedResponse.getUsers().addAll(pageResponse.getUsers());
-                if (pageResponse.getOrganizations() != null) accumulatedResponse.getOrganizations().addAll(pageResponse.getOrganizations());
-                if (pageResponse.getGroups() != null) accumulatedResponse.getGroups().addAll(pageResponse.getGroups());
+                mergePageResults(accumulatedResponse, pageResponse);
                 hasMore = pageResponse.getNextPage() != null;
                 page++;
             }
@@ -86,5 +83,22 @@ public class ZendeskSearchTools {
         validateSearchQuery(query);
         log.info("MCP Tool called: searchCount(query='{}')", query);
         return searchClient.count(query).block();
+    }
+
+    private boolean isPageEmpty(SearchResponse pageResponse) {
+        return pageResponse == null || pageResponse.getResults() == null || pageResponse.getResults().isEmpty();
+    }
+
+    private void mergePageResults(SearchResponse accumulatedResponse, SearchResponse pageResponse) {
+        accumulatedResponse.getResults().addAll(pageResponse.getResults());
+        if (pageResponse.getUsers() != null) {
+            accumulatedResponse.getUsers().addAll(pageResponse.getUsers());
+        }
+        if (pageResponse.getOrganizations() != null) {
+            accumulatedResponse.getOrganizations().addAll(pageResponse.getOrganizations());
+        }
+        if (pageResponse.getGroups() != null) {
+            accumulatedResponse.getGroups().addAll(pageResponse.getGroups());
+        }
     }
 }
