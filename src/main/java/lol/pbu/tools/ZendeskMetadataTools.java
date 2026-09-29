@@ -12,7 +12,6 @@ import lol.pbu.service.ZendeskMetadataService;
 import lol.pbu.client.CustomStatusClient;
 import lol.pbu.z4j.client.TicketFormsClient;
 import lol.pbu.z4j.model.TicketFieldCustomStatusObject;
-import lol.pbu.z4j.model.TicketFieldCustomStatusObjectStatusCategory;
 import lol.pbu.z4j.model.TicketForm;
 import lol.pbu.z4j.model.TicketFormResponse;
 import org.slf4j.Logger;
@@ -24,7 +23,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static lol.pbu.tools.ToolValidationSupport.validateKnownParameters;
 
@@ -33,6 +31,9 @@ public class ZendeskMetadataTools {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskMetadataTools.class);
     private static final String TICKET_FORMS_KEY = "ticket_forms";
+    private static final String PARAM_TICKET_FORM_ID = "ticket_form_id";
+    private static final String PARAM_TICKET_FORM_ID_CAMEL = "ticketFormId";
+    private static final String KEY_DEFAULT = "default";
 
     private final ZendeskMetadataService metadataService;
     private final TicketFormsClient ticketFormsClient;
@@ -93,39 +94,10 @@ public class ZendeskMetadataTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: listCustomStatuses(statusCategory='{}', ticketFormId={}, includeInactive={}, fullPayload={})", statusCategory, ticketFormId, includeInactive, fullPayload);
-        validateKnownParameters(request, "listCustomStatuses", "statusCategory", "ticketFormId", "ticket_form_id", "includeInactive", "fullPayload");
+        validateKnownParameters(request, "listCustomStatuses", "statusCategory", PARAM_TICKET_FORM_ID_CAMEL, PARAM_TICKET_FORM_ID, "includeInactive", "fullPayload");
 
-        Long resolvedTicketFormId = ticketFormId;
-        if (resolvedTicketFormId == null && request != null && request.arguments() != null) {
-            if (request.arguments().containsKey("ticket_form_id")) {
-                Object val = request.arguments().get("ticket_form_id");
-                if (val instanceof Number n) {
-                    resolvedTicketFormId = n.longValue();
-                } else if (val != null) {
-                    try {
-                        resolvedTicketFormId = Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {}
-                }
-            } else if (request.arguments().containsKey("ticketFormId")) {
-                Object val = request.arguments().get("ticketFormId");
-                if (val instanceof Number n) {
-                    resolvedTicketFormId = n.longValue();
-                } else if (val != null) {
-                    try {
-                        resolvedTicketFormId = Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {}
-                }
-            }
-        }
-
-        String normalizedCategory = null;
-        if (StringUtils.isNotEmpty(statusCategory)) {
-            normalizedCategory = statusCategory.trim().toLowerCase();
-            Set<String> validCategories = Set.of("new", "open", "pending", "hold", "solved");
-            if (!validCategories.contains(normalizedCategory)) {
-                throw new IllegalArgumentException("Invalid status category: '" + statusCategory + "'. Allowed categories are: new, open, pending, hold, solved.");
-            }
-        }
+        Long resolvedTicketFormId = resolveOptionalTicketFormId(ticketFormId, request);
+        String normalizedCategory = validateAndNormalizeCategory(statusCategory);
 
         if (customStatusClient == null) {
             Map<String, Object> empty = new LinkedHashMap<>();
@@ -135,22 +107,70 @@ public class ZendeskMetadataTools {
         }
 
         List<TicketFieldCustomStatusObject> allStatuses = getCachedCustomStatuses(false);
-        List<TicketFieldCustomStatusObject> statuses = new ArrayList<>(allStatuses);
-
-        if (!Boolean.TRUE.equals(includeInactive)) {
-            statuses = statuses.stream()
-                    .filter(s -> Boolean.TRUE.equals(s.getActive()))
-                    .collect(Collectors.toList());
-        }
-
-        if (normalizedCategory != null) {
-            final String cat = normalizedCategory;
-            statuses = statuses.stream()
-                    .filter(s -> s.getStatusCategory() != null && cat.equalsIgnoreCase(s.getStatusCategory().getValue()))
-                    .collect(Collectors.toList());
-        }
-
         List<TicketFormStatus> allFormStatuses = getCachedTicketFormStatuses(false);
+        Map<Long, List<Long>> statusToForms = buildStatusToFormsMap(allFormStatuses);
+        List<TicketFieldCustomStatusObject> statuses = filterCustomStatuses(allStatuses, includeInactive, normalizedCategory, resolvedTicketFormId, statusToForms);
+        Map<String, List<Map<String, Object>>> categoryMap = buildCategoryMap(statuses, normalizedCategory, statusToForms);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (resolvedTicketFormId != null) {
+            result.put(PARAM_TICKET_FORM_ID, resolvedTicketFormId);
+        }
+
+        if (Boolean.TRUE.equals(fullPayload)) {
+            result.put("custom_statuses", statuses);
+            result.put("status_categories", categoryMap);
+            if (allFormStatuses != null && !allFormStatuses.isEmpty()) {
+                result.put("ticket_form_statuses", allFormStatuses);
+            }
+            return result;
+        }
+
+        result.put("custom_statuses", buildStatusSummaries(statuses, statusToForms));
+        result.put("status_categories", categoryMap);
+        return result;
+    }
+
+    private Long resolveOptionalTicketFormId(@Nullable Long ticketFormId, @Nullable CallToolRequest request) {
+        if (ticketFormId != null) {
+            return ticketFormId;
+        }
+        if (request != null && request.arguments() != null) {
+            if (request.arguments().containsKey(PARAM_TICKET_FORM_ID)) {
+                return parseOptionalFormId(request.arguments().get(PARAM_TICKET_FORM_ID));
+            } else if (request.arguments().containsKey(PARAM_TICKET_FORM_ID_CAMEL)) {
+                return parseOptionalFormId(request.arguments().get(PARAM_TICKET_FORM_ID_CAMEL));
+            }
+        }
+        return null;
+    }
+
+    private Long parseOptionalFormId(Object val) {
+        if (val instanceof Number n) {
+            return n.longValue();
+        } else if (val != null) {
+            try {
+                return Long.parseLong(val.toString().trim());
+            } catch (NumberFormatException _) {
+                // Ignore non-numeric ticket form ID in list filter
+            }
+        }
+        return null;
+    }
+
+    private String validateAndNormalizeCategory(@Nullable String statusCategory) {
+        if (StringUtils.isNotEmpty(statusCategory)) {
+            String normalizedCategory = statusCategory.trim().toLowerCase();
+            Set<String> validCategories = Set.of("new", "open", "pending", "hold", "solved");
+            if (!validCategories.contains(normalizedCategory)) {
+                throw new IllegalArgumentException("Invalid status category: '" + statusCategory + "'. Allowed categories are: new, open, pending, hold, solved.");
+            }
+            return normalizedCategory;
+        }
+        return null;
+    }
+
+    private Map<Long, List<Long>> buildStatusToFormsMap(@Nullable List<TicketFormStatus> allFormStatuses) {
         Map<Long, List<Long>> statusToForms = new LinkedHashMap<>();
         if (allFormStatuses != null) {
             for (TicketFormStatus fs : allFormStatuses) {
@@ -159,7 +179,28 @@ public class ZendeskMetadataTools {
                 }
             }
         }
+        return statusToForms;
+    }
 
+    private List<TicketFieldCustomStatusObject> filterCustomStatuses(
+            List<TicketFieldCustomStatusObject> allStatuses,
+            @Nullable Boolean includeInactive,
+            @Nullable String normalizedCategory,
+            @Nullable Long resolvedTicketFormId,
+            Map<Long, List<Long>> statusToForms
+    ) {
+        List<TicketFieldCustomStatusObject> statuses = allStatuses;
+        if (!Boolean.TRUE.equals(includeInactive)) {
+            statuses = statuses.stream()
+                    .filter(s -> Boolean.TRUE.equals(s.getActive()))
+                    .toList();
+        }
+        if (normalizedCategory != null) {
+            final String cat = normalizedCategory;
+            statuses = statuses.stream()
+                    .filter(s -> s.getStatusCategory() != null && cat.equalsIgnoreCase(s.getStatusCategory().getValue()))
+                    .toList();
+        }
         if (resolvedTicketFormId != null) {
             final Long formId = resolvedTicketFormId;
             statuses = statuses.stream().filter(s -> {
@@ -167,10 +208,17 @@ public class ZendeskMetadataTools {
                 if (Boolean.TRUE.equals(s.getIsDefault())) return true;
                 if (statusToForms.isEmpty()) return true;
                 List<Long> forms = statusToForms.get(s.getId());
-                return forms != null ? forms.contains(formId) : true;
-            }).collect(Collectors.toList());
+                return forms == null || forms.contains(formId);
+            }).toList();
         }
+        return statuses;
+    }
 
+    private Map<String, List<Map<String, Object>>> buildCategoryMap(
+            List<TicketFieldCustomStatusObject> statuses,
+            @Nullable String normalizedCategory,
+            Map<Long, List<Long>> statusToForms
+    ) {
         Map<String, List<Map<String, Object>>> categoryMap = new LinkedHashMap<>();
         List<String> stdCategories = List.of("new", "open", "pending", "hold", "solved");
         for (String cat : stdCategories) {
@@ -185,7 +233,7 @@ public class ZendeskMetadataTools {
             Map<String, Object> catItem = new LinkedHashMap<>();
             catItem.put("id", s.getId());
             catItem.put("agent_label", s.getAgentLabel());
-            catItem.put("default", s.getIsDefault());
+            catItem.put(KEY_DEFAULT, s.getIsDefault());
             if (statusToForms.containsKey(s.getId())) {
                 catItem.put("ticket_form_ids", statusToForms.get(s.getId()));
             } else {
@@ -193,28 +241,20 @@ public class ZendeskMetadataTools {
             }
             catList.add(catItem);
         }
+        return categoryMap;
+    }
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        if (resolvedTicketFormId != null) {
-            result.put("ticket_form_id", resolvedTicketFormId);
-        }
-
-        if (Boolean.TRUE.equals(fullPayload)) {
-            result.put("custom_statuses", statuses);
-            result.put("status_categories", categoryMap);
-            if (allFormStatuses != null && !allFormStatuses.isEmpty()) {
-                result.put("ticket_form_statuses", allFormStatuses);
-            }
-            return result;
-        }
-
-        List<Map<String, Object>> summaries = statuses.stream().map(s -> {
+    private List<Map<String, Object>> buildStatusSummaries(
+            List<TicketFieldCustomStatusObject> statuses,
+            Map<Long, List<Long>> statusToForms
+    ) {
+        return statuses.stream().map(s -> {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", s.getId());
             item.put("agent_label", s.getAgentLabel());
             item.put("status_category", s.getStatusCategory() != null ? s.getStatusCategory().getValue() : null);
             item.put("active", s.getActive());
-            item.put("default", s.getIsDefault());
+            item.put(KEY_DEFAULT, s.getIsDefault());
             if (statusToForms.containsKey(s.getId())) {
                 item.put("ticket_form_ids", statusToForms.get(s.getId()));
             } else {
@@ -224,11 +264,7 @@ public class ZendeskMetadataTools {
                 item.put("description", s.getDescription());
             }
             return item;
-        }).collect(Collectors.toList());
-
-        result.put("custom_statuses", summaries);
-        result.put("status_categories", categoryMap);
-        return result;
+        }).toList();
     }
 
     public Map<String, Object> listCustomStatuses(
@@ -293,7 +329,7 @@ public class ZendeskMetadataTools {
         if (activeOnly) {
             forms = forms.stream()
                     .filter(f -> Boolean.TRUE.equals(f.getActive()))
-                    .collect(Collectors.toList());
+                    .toList();
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -308,9 +344,9 @@ public class ZendeskMetadataTools {
             s.put("name", f.getName());
             s.put("display_name", f.getDisplayName());
             s.put("active", f.getActive());
-            s.put("default", f.getDefaultForm());
+            s.put(KEY_DEFAULT, f.getDefaultForm());
             return s;
-        }).collect(Collectors.toList());
+        }).toList();
 
         result.put(TICKET_FORMS_KEY, summaries);
         return result;
@@ -322,7 +358,7 @@ public class ZendeskMetadataTools {
     ) {
         log.info("MCP Tool called: getTicketForm(id={})", ticketFormId);
         if (ticketFormId == null) {
-            throw new IllegalArgumentException("ticketFormId is required");
+            throw new IllegalArgumentException(PARAM_TICKET_FORM_ID_CAMEL + " is required");
         }
         validateTicketFormBounds(ticketFormId);
         return ticketFormsClient.showTicketForm(ticketFormId).block();

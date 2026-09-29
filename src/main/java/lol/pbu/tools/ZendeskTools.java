@@ -22,7 +22,45 @@ import lol.pbu.z4j.client.TicketFormsClient;
 import lol.pbu.z4j.client.TopicClient;
 import lol.pbu.z4j.client.TranslationClient;
 import lol.pbu.z4j.client.ViewClient;
-import lol.pbu.z4j.model.*;
+import lol.pbu.z4j.model.ArticleResponse;
+import lol.pbu.z4j.model.ArticlesResponse;
+import lol.pbu.z4j.model.AttachmentUploadResponse;
+import lol.pbu.z4j.model.CategoriesResponse;
+import lol.pbu.z4j.model.CategoryResponse;
+import lol.pbu.z4j.model.CommunityPostSearchResponse;
+import lol.pbu.z4j.model.CustomObjectRecordResponse;
+import lol.pbu.z4j.model.CustomObjectRecordsResponse;
+import lol.pbu.z4j.model.CustomObjectResponse;
+import lol.pbu.z4j.model.CustomObjectsResponse;
+import lol.pbu.z4j.model.JobStatusResponse;
+import lol.pbu.z4j.model.LocaleAbbreviation;
+import lol.pbu.z4j.model.PostCommentsResponse;
+import lol.pbu.z4j.model.PostResponse;
+import lol.pbu.z4j.model.PostsResponse;
+import lol.pbu.z4j.model.Search;
+import lol.pbu.z4j.model.SearchResponse;
+import lol.pbu.z4j.model.SortArticleBy;
+import lol.pbu.z4j.model.SortOrder;
+import lol.pbu.z4j.model.TicketAuditsResponse;
+import lol.pbu.z4j.model.TicketCountResponse;
+import lol.pbu.z4j.model.TicketCustomField;
+import lol.pbu.z4j.model.TicketFieldCustomStatusObject;
+import lol.pbu.z4j.model.TicketFieldResponse;
+import lol.pbu.z4j.model.TicketFieldsResponse;
+import lol.pbu.z4j.model.TicketForm;
+import lol.pbu.z4j.model.TicketFormResponse;
+import lol.pbu.z4j.model.TicketResponse;
+import lol.pbu.z4j.model.TicketUpdateInput;
+import lol.pbu.z4j.model.TicketUpdateResponse;
+import lol.pbu.z4j.model.TicketsResponse;
+import lol.pbu.z4j.model.TopicResponse;
+import lol.pbu.z4j.model.TopicsResponse;
+import lol.pbu.z4j.model.TranslationResponse;
+import lol.pbu.z4j.model.TranslationsResponse;
+import lol.pbu.z4j.model.ViewCountResponse;
+import lol.pbu.z4j.model.ViewExecuteResponse;
+import lol.pbu.z4j.model.ViewResponse;
+import lol.pbu.z4j.model.ViewsResponse;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -32,8 +70,9 @@ import java.util.Map;
  * Facade preserving backwards compatibility by delegating to domain-specific tool singletons.
  * @deprecated Inject domain-specific tool classes (ZendeskTicketTools, ZendeskSearchTools, etc.) directly.
  */
-@Deprecated
+@Deprecated(since = "0.2.0", forRemoval = true)
 @Singleton
+@SuppressWarnings({"java:S1133", "java:S107"})
 public class ZendeskTools {
 
     private final ZendeskTicketTools ticketTools;
@@ -117,42 +156,14 @@ public class ZendeskTools {
             @Nullable CustomStatusClient customStatusClient,
             @Nullable ZendeskMetadataService metadataService
     ) {
-        this(
-                ticketClient, searchClient, ticketFormsClient, customObjectsClient, customObjectRecordsClient,
-                attachmentClient, jobStatusClient, viewClient, articleClient, categoryClient, translationClient,
-                topicClient, postClient, customStatusClient,
-                metadataService != null ? metadataService : new ZendeskMetadataService(customStatusClient, ticketFormsClient),
-                null
-        );
-    }
-
-    private ZendeskTools(
-            TicketClient ticketClient,
-            SearchClient searchClient,
-            TicketFormsClient ticketFormsClient,
-            CustomObjectsClient customObjectsClient,
-            CustomObjectRecordsClient customObjectRecordsClient,
-            AttachmentClient attachmentClient,
-            JobStatusClient jobStatusClient,
-            ViewClient viewClient,
-            ArticleClient articleClient,
-            CategoryClient categoryClient,
-            TranslationClient translationClient,
-            TopicClient topicClient,
-            PostClient postClient,
-            @Nullable CustomStatusClient customStatusClient,
-            ZendeskMetadataService effectiveMetadataService,
-            Void ignored
-    ) {
-        this(
-                new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, effectiveMetadataService),
-                new ZendeskSearchTools(searchClient),
-                new ZendeskViewTools(viewClient),
-                new ZendeskHelpCenterTools(articleClient, categoryClient, translationClient),
-                new ZendeskCommunityTools(topicClient, postClient),
-                new ZendeskCustomObjectTools(customObjectsClient, customObjectRecordsClient),
-                new ZendeskMetadataTools(effectiveMetadataService, ticketFormsClient, customStatusClient)
-        );
+        ZendeskMetadataService effectiveMetadataService = metadataService != null ? metadataService : new ZendeskMetadataService(customStatusClient, ticketFormsClient);
+        this.ticketTools = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, effectiveMetadataService);
+        this.searchTools = new ZendeskSearchTools(searchClient);
+        this.viewTools = new ZendeskViewTools(viewClient);
+        this.helpCenterTools = new ZendeskHelpCenterTools(articleClient, categoryClient, translationClient);
+        this.communityTools = new ZendeskCommunityTools(topicClient, postClient);
+        this.customObjectTools = new ZendeskCustomObjectTools(customObjectsClient, customObjectRecordsClient);
+        this.metadataTools = new ZendeskMetadataTools(effectiveMetadataService, ticketFormsClient, customStatusClient);
     }
 
     public ZendeskTools(TicketClient ticketClient, SearchClient searchClient) {

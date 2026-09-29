@@ -36,16 +36,7 @@ public final class ToolValidationSupport {
             return customStatusId;
         }
         if (request != null && request.arguments() != null && request.arguments().containsKey("custom_status_id")) {
-            Object val = request.arguments().get("custom_status_id");
-            if (val instanceof Number num) {
-                return num.longValue();
-            } else if (val != null) {
-                try {
-                    return Long.parseLong(val.toString().trim());
-                } catch (NumberFormatException _) {
-                    throw new IllegalArgumentException("custom_status_id must be a numeric ID, got: " + val);
-                }
-            }
+            return parseLongArgument(request.arguments().get("custom_status_id"), "custom_status_id");
         }
         return null;
     }
@@ -66,27 +57,23 @@ public final class ToolValidationSupport {
         }
         if (request != null && request.arguments() != null) {
             if (request.arguments().containsKey("ticket_form_id")) {
-                Object val = request.arguments().get("ticket_form_id");
-                if (val instanceof Number num) {
-                    return num.longValue();
-                } else if (val != null) {
-                    try {
-                        return Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {
-                        throw new IllegalArgumentException("ticket_form_id must be a numeric ID, got: " + val);
-                    }
-                }
-            } else if (request.arguments().containsKey("ticketFormId")) {
-                Object val = request.arguments().get("ticketFormId");
-                if (val instanceof Number num) {
-                    return num.longValue();
-                } else if (val != null) {
-                    try {
-                        return Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {
-                        throw new IllegalArgumentException("ticketFormId must be a numeric ID, got: " + val);
-                    }
-                }
+                return parseLongArgument(request.arguments().get("ticket_form_id"), "ticket_form_id");
+            }
+            if (request.arguments().containsKey("ticketFormId")) {
+                return parseLongArgument(request.arguments().get("ticketFormId"), "ticketFormId");
+            }
+        }
+        return null;
+    }
+
+    private static Long parseLongArgument(Object val, String paramName) {
+        if (val instanceof Number num) {
+            return num.longValue();
+        } else if (val != null) {
+            try {
+                return Long.parseLong(val.toString().trim());
+            } catch (NumberFormatException _) {
+                throw new IllegalArgumentException(paramName + " must be a numeric ID, got: " + val);
             }
         }
         return null;
