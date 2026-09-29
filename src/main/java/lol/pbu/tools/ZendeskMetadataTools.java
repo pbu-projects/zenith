@@ -34,6 +34,8 @@ public class ZendeskMetadataTools {
     private static final String PARAM_TICKET_FORM_ID = "ticket_form_id";
     private static final String PARAM_TICKET_FORM_ID_CAMEL = "ticketFormId";
     private static final String KEY_DEFAULT = "default";
+    private static final String KEY_CUSTOM_STATUSES = "custom_statuses";
+    private static final String KEY_STATUS_CATEGORIES = "status_categories";
 
     private final ZendeskMetadataService metadataService;
     private final TicketFormsClient ticketFormsClient;
@@ -101,8 +103,8 @@ public class ZendeskMetadataTools {
 
         if (customStatusClient == null) {
             Map<String, Object> empty = new LinkedHashMap<>();
-            empty.put("custom_statuses", Collections.emptyList());
-            empty.put("status_categories", Collections.emptyMap());
+            empty.put(KEY_CUSTOM_STATUSES, Collections.emptyList());
+            empty.put(KEY_STATUS_CATEGORIES, Collections.emptyMap());
             return empty;
         }
 
@@ -118,16 +120,16 @@ public class ZendeskMetadataTools {
         }
 
         if (Boolean.TRUE.equals(fullPayload)) {
-            result.put("custom_statuses", statuses);
-            result.put("status_categories", categoryMap);
+            result.put(KEY_CUSTOM_STATUSES, statuses);
+            result.put(KEY_STATUS_CATEGORIES, categoryMap);
             if (allFormStatuses != null && !allFormStatuses.isEmpty()) {
                 result.put("ticket_form_statuses", allFormStatuses);
             }
             return result;
         }
 
-        result.put("custom_statuses", buildStatusSummaries(statuses, statusToForms));
-        result.put("status_categories", categoryMap);
+        result.put(KEY_CUSTOM_STATUSES, buildStatusSummaries(statuses, statusToForms));
+        result.put(KEY_STATUS_CATEGORIES, categoryMap);
         return result;
     }
 

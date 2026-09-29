@@ -54,6 +54,7 @@ import java.util.stream.Collectors;
 public class ZendeskMetadataService {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskMetadataService.class);
+    private static final String ID_NAME_FORMAT = "[%d: '%s']";
 
     public static final long CUSTOM_STATUS_CACHE_TTL_MS = 5 * 60 * 1000L; // 5 minutes
     public static final long TICKET_FORM_CACHE_TTL_MS = 5 * 60 * 1000L;   // 5 minutes
@@ -253,7 +254,7 @@ public class ZendeskMetadataService {
         if (matchOpt.isEmpty()) {
             String activeList = forms.stream()
                     .filter(f -> f != null && Boolean.TRUE.equals(f.getActive()))
-                    .map(f -> String.format("[%d: '%s']", f.getId(), f.getName()))
+                    .map(f -> String.format(ID_NAME_FORMAT, f.getId(), f.getName()))
                     .collect(Collectors.joining(", "));
             throw new IllegalArgumentException("Ticket form ID " + ticketFormId + " does not exist. Active ticket forms are: " + (activeList.isEmpty() ? "none" : activeList));
         }
@@ -278,6 +279,14 @@ public class ZendeskMetadataService {
             throw new IllegalArgumentException("No custom statuses found for this Zendesk account. Make sure custom ticket statuses are enabled.");
         }
 
+        TicketFieldCustomStatusObject statusObj = findStatusOrThrow(statuses, customStatusId);
+        validateStatusActive(statusObj, customStatusId);
+        validateCategoryMatch(statusObj, customStatusId, targetStatus, statuses);
+
+        return statusObj;
+    }
+
+    private TicketFieldCustomStatusObject findStatusOrThrow(List<TicketFieldCustomStatusObject> statuses, Long customStatusId) {
         Optional<TicketFieldCustomStatusObject> matchOpt = statuses.stream()
                 .filter(s -> s != null && s.getId() != null && s.getId().equals(customStatusId))
                 .findFirst();
@@ -289,19 +298,23 @@ public class ZendeskMetadataService {
                     .collect(Collectors.joining(", "));
             throw new IllegalArgumentException("Custom status ID " + customStatusId + " does not exist. Active custom statuses are: " + (activeList.isEmpty() ? "none" : activeList));
         }
+        return matchOpt.get();
+    }
 
-        TicketFieldCustomStatusObject statusObj = matchOpt.get();
+    private void validateStatusActive(TicketFieldCustomStatusObject statusObj, Long customStatusId) {
         if (!Boolean.TRUE.equals(statusObj.getActive())) {
             throw new IllegalArgumentException("Custom status ID " + customStatusId + " ('" + statusObj.getAgentLabel() + "') is inactive.");
         }
+    }
 
+    private void validateCategoryMatch(TicketFieldCustomStatusObject statusObj, Long customStatusId, @Nullable String targetStatus, List<TicketFieldCustomStatusObject> statuses) {
         if (StringUtils.isNotEmpty(targetStatus)) {
             String expectedCat = targetStatus.trim().toLowerCase();
             String actualCat = statusObj.getStatusCategory() != null ? statusObj.getStatusCategory().getValue() : null;
             if (actualCat != null && !actualCat.equalsIgnoreCase(expectedCat)) {
                 String matchingStatuses = statuses.stream()
                         .filter(s -> s != null && Boolean.TRUE.equals(s.getActive()) && s.getStatusCategory() != null && expectedCat.equalsIgnoreCase(s.getStatusCategory().getValue()))
-                        .map(s -> String.format("[%d: '%s']", s.getId(), s.getAgentLabel()))
+                        .map(s -> String.format(ID_NAME_FORMAT, s.getId(), s.getAgentLabel()))
                         .collect(Collectors.joining(", "));
                 throw new IllegalArgumentException(String.format(
                         "Custom status ID %d ('%s') belongs to category '%s', which does not match status '%s'. Valid active custom statuses for '%s' are: %s",
@@ -310,8 +323,6 @@ public class ZendeskMetadataService {
                 ));
             }
         }
-
-        return statusObj;
     }
 
     public void validateTicketCustomStatusCategoryMatch(Long ticketId, Ticket currentTicket, TicketFieldCustomStatusObject customStatus, Long customStatusId) {
@@ -327,8 +338,7 @@ public class ZendeskMetadataService {
     }
 
     public void validateCustomStatusForForm(TicketFieldCustomStatusObject customStatus, Long ticketFormId) {
-        if (customStatus == null || ticketFormId == null) return;
-        if (Boolean.TRUE.equals(customStatus.getIsDefault())) {
+        if (customStatus == null || ticketFormId == null || Boolean.TRUE.equals(customStatus.getIsDefault())) {
             return;
         }
         List<TicketFormStatus> formStatuses = getCachedTicketFormStatuses(false);
@@ -346,23 +356,27 @@ public class ZendeskMetadataService {
                 .anyMatch(fs -> fs != null && ticketFormId.equals(fs.ticketFormId()) && customStatus.getId().equals(fs.customStatusId()));
 
         if (!statusAllowedOnForm) {
-            List<TicketFieldCustomStatusObject> allStatuses = getCachedCustomStatuses(false);
-            String category = customStatus.getStatusCategory() != null ? customStatus.getStatusCategory().getValue() : null;
-            String validForForm = allStatuses.stream()
-                    .filter(s -> s != null && Boolean.TRUE.equals(s.getActive()))
-                    .filter(s -> category == null || (s.getStatusCategory() != null && category.equalsIgnoreCase(s.getStatusCategory().getValue())))
-                    .filter(s -> Boolean.TRUE.equals(s.getIsDefault()) || formStatuses.stream().anyMatch(fs -> ticketFormId.equals(fs.ticketFormId()) && s.getId().equals(fs.customStatusId())))
-                    .map(s -> String.format("[%d: '%s']", s.getId(), s.getAgentLabel()))
-                    .collect(Collectors.joining(", "));
-
-            throw new IllegalArgumentException(String.format(
-                    "Custom status ID %d ('%s') cannot be used with ticket form #%d. Valid active custom statuses for this form%s are: %s.",
-                    customStatus.getId(),
-                    customStatus.getAgentLabel(),
-                    ticketFormId,
-                    category != null ? " under category '" + category + "'" : "",
-                    validForForm.isEmpty() ? "none" : validForForm
-            ));
+            throwStatusNotAllowedOnForm(customStatus, ticketFormId, formStatuses);
         }
+    }
+
+    private void throwStatusNotAllowedOnForm(TicketFieldCustomStatusObject customStatus, Long ticketFormId, List<TicketFormStatus> formStatuses) {
+        List<TicketFieldCustomStatusObject> allStatuses = getCachedCustomStatuses(false);
+        String category = customStatus.getStatusCategory() != null ? customStatus.getStatusCategory().getValue() : null;
+        String validForForm = allStatuses.stream()
+                .filter(s -> s != null && Boolean.TRUE.equals(s.getActive()))
+                .filter(s -> category == null || (s.getStatusCategory() != null && category.equalsIgnoreCase(s.getStatusCategory().getValue())))
+                .filter(s -> Boolean.TRUE.equals(s.getIsDefault()) || formStatuses.stream().anyMatch(fs -> ticketFormId.equals(fs.ticketFormId()) && s.getId().equals(fs.customStatusId())))
+                .map(s -> String.format(ID_NAME_FORMAT, s.getId(), s.getAgentLabel()))
+                .collect(Collectors.joining(", "));
+
+        throw new IllegalArgumentException(String.format(
+                "Custom status ID %d ('%s') cannot be used with ticket form #%d. Valid active custom statuses for this form%s are: %s.",
+                customStatus.getId(),
+                customStatus.getAgentLabel(),
+                ticketFormId,
+                category != null ? " under category '" + category + "'" : "",
+                validForForm.isEmpty() ? "none" : validForForm
+        ));
     }
 }

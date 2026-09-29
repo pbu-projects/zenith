@@ -47,10 +47,12 @@ public class TicketUpdateInputWithForm extends TicketUpdateInput {
         super();
     }
 
+    @Override
     public @Nullable Long getTicketFormId() {
         return ticketFormId;
     }
 
+    @Override
     public TicketUpdateInputWithForm setTicketFormId(@Nullable Long ticketFormId) {
         this.ticketFormId = ticketFormId;
         return this;

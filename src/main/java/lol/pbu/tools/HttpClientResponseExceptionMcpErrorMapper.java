@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 
 /**
@@ -95,20 +97,14 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         if (response != null) {
             return response.code();
         }
-        if (e.getStatus() != null) {
-            return e.getStatus().getCode();
-        }
-        return 500;
+        return e.getStatus().getCode();
     }
 
     private String resolveReason(HttpResponse<?> response, HttpClientResponseException e) {
         if (response != null) {
             return response.reason();
         }
-        if (e.getStatus() != null) {
-            return e.getStatus().getReason();
-        }
-        return "Internal Error";
+        return e.getStatus().getReason();
     }
 
     private int resolveMcpErrorCode(int statusCode) {
@@ -268,11 +264,9 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
     private String formatDetailValue(JsonNode val) {
         if (val.isArray()) {
-            List<String> listItems = new ArrayList<>();
-            for (JsonNode item : val.values()) {
-                listItems.add(extractItemDescription(item));
-            }
-            return String.join(", ", listItems);
+            return StreamSupport.stream(val.values().spliterator(), false)
+                    .map(this::extractItemDescription)
+                    .collect(Collectors.joining(", "));
         }
         return extractItemDescription(val);
     }
