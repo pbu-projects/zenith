@@ -1,21 +1,13 @@
 package lol.pbu.tools;
 
 import io.micronaut.core.annotation.Nullable;
-import io.micronaut.core.util.StringUtils;
-import io.micronaut.http.MediaType;
-import io.micronaut.mcp.annotations.Tool;
-import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lol.pbu.client.CustomStatusClient;
 import lol.pbu.model.BatchUpdateResponse;
-import lol.pbu.model.BatchUpdateResponse.TicketUpdateResult;
-import lol.pbu.model.CustomStatusesResponse;
-import lol.pbu.model.CustomStatusResponse;
 import lol.pbu.model.TicketFormStatus;
-import lol.pbu.model.TicketFormStatusesResponse;
 import lol.pbu.model.TicketMutationOptions;
-import lol.pbu.model.TicketUpdateInputWithForm;
 import lol.pbu.service.ZendeskMetadataService;
 import lol.pbu.z4j.client.ArticleClient;
 import lol.pbu.z4j.client.AttachmentClient;
@@ -31,54 +23,45 @@ import lol.pbu.z4j.client.TopicClient;
 import lol.pbu.z4j.client.TranslationClient;
 import lol.pbu.z4j.client.ViewClient;
 import lol.pbu.z4j.model.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.Map;
-import java.util.HashSet;
-import java.util.Arrays;
-import java.util.Optional;
-import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
-import lol.pbu.z4j.model.TicketCustomField;
-import java.util.LinkedHashMap;
-import java.util.stream.Collectors;
 
 /**
- * MCP Tools exposing Zendesk ticket management, forms, custom objects, attachments, search, views, articles, categories, translations, and community operations via z4j.
+ * Facade preserving backwards compatibility by delegating to domain-specific tool singletons.
+ * @deprecated Inject domain-specific tool classes (ZendeskTicketTools, ZendeskSearchTools, etc.) directly.
  */
+@Deprecated
 @Singleton
 public class ZendeskTools {
 
-    private static final Logger log = LoggerFactory.getLogger(ZendeskTools.class);
-    private static final String TICKET_FORMS_KEY = "ticket_forms";
-    private static final String TYPE_INCIDENT = "incident";
+    private final ZendeskTicketTools ticketTools;
+    private final ZendeskSearchTools searchTools;
+    private final ZendeskViewTools viewTools;
+    private final ZendeskHelpCenterTools helpCenterTools;
+    private final ZendeskCommunityTools communityTools;
+    private final ZendeskCustomObjectTools customObjectTools;
+    private final ZendeskMetadataTools metadataTools;
 
-    private final TicketClient ticketClient;
-    private final SearchClient searchClient;
-    private final TicketFormsClient ticketFormsClient;
-    private final CustomObjectsClient customObjectsClient;
-    private final CustomObjectRecordsClient customObjectRecordsClient;
-    private final AttachmentClient attachmentClient;
-    private final JobStatusClient jobStatusClient;
-    private final ViewClient viewClient;
-    private final ArticleClient articleClient;
-    private final CategoryClient categoryClient;
-    private final TranslationClient translationClient;
-    private final TopicClient topicClient;
-    private final PostClient postClient;
-    private final CustomStatusClient customStatusClient;
-    private final ZendeskMetadataService metadataService;
+    @Inject
+    public ZendeskTools(
+            ZendeskTicketTools ticketTools,
+            ZendeskSearchTools searchTools,
+            ZendeskViewTools viewTools,
+            ZendeskHelpCenterTools helpCenterTools,
+            ZendeskCommunityTools communityTools,
+            ZendeskCustomObjectTools customObjectTools,
+            ZendeskMetadataTools metadataTools
+    ) {
+        this.ticketTools = ticketTools;
+        this.searchTools = searchTools;
+        this.viewTools = viewTools;
+        this.helpCenterTools = helpCenterTools;
+        this.communityTools = communityTools;
+        this.customObjectTools = customObjectTools;
+        this.metadataTools = metadataTools;
+    }
 
     public ZendeskTools(
             TicketClient ticketClient,
@@ -117,7 +100,6 @@ public class ZendeskTools {
         this(ticketClient, searchClient, ticketFormsClient, customObjectsClient, customObjectRecordsClient, attachmentClient, jobStatusClient, viewClient, articleClient, categoryClient, translationClient, topicClient, postClient, customStatusClient, null);
     }
 
-    @Inject
     public ZendeskTools(
             TicketClient ticketClient,
             SearchClient searchClient,
@@ -135,269 +117,89 @@ public class ZendeskTools {
             @Nullable CustomStatusClient customStatusClient,
             @Nullable ZendeskMetadataService metadataService
     ) {
-        this.ticketClient = ticketClient;
-        this.searchClient = searchClient;
-        this.ticketFormsClient = ticketFormsClient;
-        this.customObjectsClient = customObjectsClient;
-        this.customObjectRecordsClient = customObjectRecordsClient;
-        this.attachmentClient = attachmentClient;
-        this.jobStatusClient = jobStatusClient;
-        this.viewClient = viewClient;
-        this.articleClient = articleClient;
-        this.categoryClient = categoryClient;
-        this.translationClient = translationClient;
-        this.topicClient = topicClient;
-        this.postClient = postClient;
-        this.customStatusClient = customStatusClient;
-        this.metadataService = metadataService != null ? metadataService : new ZendeskMetadataService(customStatusClient, ticketFormsClient);
+        this(
+                ticketClient, searchClient, ticketFormsClient, customObjectsClient, customObjectRecordsClient,
+                attachmentClient, jobStatusClient, viewClient, articleClient, categoryClient, translationClient,
+                topicClient, postClient, customStatusClient,
+                metadataService != null ? metadataService : new ZendeskMetadataService(customStatusClient, ticketFormsClient),
+                null
+        );
+    }
+
+    private ZendeskTools(
+            TicketClient ticketClient,
+            SearchClient searchClient,
+            TicketFormsClient ticketFormsClient,
+            CustomObjectsClient customObjectsClient,
+            CustomObjectRecordsClient customObjectRecordsClient,
+            AttachmentClient attachmentClient,
+            JobStatusClient jobStatusClient,
+            ViewClient viewClient,
+            ArticleClient articleClient,
+            CategoryClient categoryClient,
+            TranslationClient translationClient,
+            TopicClient topicClient,
+            PostClient postClient,
+            @Nullable CustomStatusClient customStatusClient,
+            ZendeskMetadataService effectiveMetadataService,
+            Void ignored
+    ) {
+        this(
+                new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, effectiveMetadataService),
+                new ZendeskSearchTools(searchClient),
+                new ZendeskViewTools(viewClient),
+                new ZendeskHelpCenterTools(articleClient, categoryClient, translationClient),
+                new ZendeskCommunityTools(topicClient, postClient),
+                new ZendeskCustomObjectTools(customObjectsClient, customObjectRecordsClient),
+                new ZendeskMetadataTools(effectiveMetadataService, ticketFormsClient, customStatusClient)
+        );
+    }
+
+    public ZendeskTools(TicketClient ticketClient, SearchClient searchClient) {
+        this(
+                ticketClient, searchClient, null, null, null,
+                null, null, null, null, null, null,
+                null, null, null, null
+        );
     }
 
     public ZendeskMetadataService getMetadataService() {
-        return metadataService;
+        return ticketTools.getMetadataService();
     }
 
-    @Tool(description = "Get details of a specific Zendesk ticket by its numeric ID")
-    public TicketResponse getTicket(@ToolArg(description = "The numeric ticket ID") Long ticketId) {
-        log.info("MCP Tool called: getTicket(id={})", ticketId);
-        return ticketClient.showTicket(ticketId).block();
+    // Tickets
+    public TicketResponse getTicket(Long ticketId) {
+        return ticketTools.getTicket(ticketId);
     }
 
-    @Tool(description = "Get details of multiple Zendesk tickets by their numeric IDs")
-    public TicketsResponse getTickets(
-            @ToolArg(description = "List of numeric ticket IDs to retrieve") List<Long> ticketIds
-    ) {
-        log.info("MCP Tool called: getTickets(ids={})", ticketIds);
-        if (ticketIds == null || ticketIds.isEmpty()) {
-            return new TicketsResponse(Collections.emptyList());
-        }
-
-        List<?> rawIds = ticketIds;
-        java.util.List<Long> distinctIds = new java.util.ArrayList<>();
-        for (Object obj : rawIds) {
-            if (obj instanceof Number num) {
-                distinctIds.add(num.longValue());
-            } else if (obj != null) {
-                try {
-                    distinctIds.add(Long.parseLong(obj.toString().trim()));
-                } catch (NumberFormatException _) {
-                    log.warn("Invalid ticket ID format: {}", obj);
-                }
-            }
-        }
-        distinctIds = distinctIds.stream().distinct().toList();
-
-        List<Ticket> tickets = Flux.fromIterable(distinctIds)
-                .flatMapSequential(id -> ticketClient.showTicket(id)
-                        .map(TicketResponse::getTicket)
-                        .onErrorMap(e -> new RuntimeException(String.format("Failed to fetch ticket %d: [%s] %s", id, e.getClass().getSimpleName(), e.getMessage())))
-                        .switchIfEmpty(Mono.error(new RuntimeException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", id)))), 10)
-                .collectList()
-                .block();
-
-        return new TicketsResponse(tickets != null ? tickets : Collections.emptyList());
+    public TicketsResponse getTickets(List<Long> ticketIds) {
+        return ticketTools.getTickets(ticketIds);
     }
 
-    @Tool(description = "List recent Zendesk tickets")
     public TicketsResponse listTickets() {
-        log.info("MCP Tool called: listTickets()");
-        return ticketClient.listTickets(null).block();
+        return ticketTools.listTickets();
     }
 
-    @Tool(description = "Get ticket count information from Zendesk")
     public TicketCountResponse getTicketCount() {
-        log.info("MCP Tool called: getTicketCount()");
-        return ticketClient.getTicketCount().block();
+        return ticketTools.getTicketCount();
     }
 
-    @Tool(description = "Search Zendesk using Zendesk search syntax (e.g. 'type:ticket status:open', 'type:ticket created>2026-01-01'). Supports sideloading related resources (users, organizations, groups) via 'include'.")
-    public SearchResponse search(
-            @ToolArg(description = "Zendesk search query string") String query,
-            @ToolArg(description = "Optional resources to sideload. E.g. 'users,organizations,groups' (auto-wrapped in tickets(...)) or explicit 'tickets(users,organizations)'") @Nullable String include,
-            @ToolArg(description = "Maximum number of results to return (default 25)") @Nullable Integer maxResults
-    ) {
-        if (query != null && query.toLowerCase().contains("problem_id:")) {
-            throw new IllegalArgumentException("Zendesk search does not support filtering by problem_id. The search index does not cover this field, and queries will silently return 0 results. If you need to find incidents linked to a problem, you must retrieve tickets individually or use a different discovery mechanism.");
-        }
-        int limit = (maxResults != null && maxResults > 0) ? maxResults : 25;
-        String resolvedInclude = null;
-        if (io.micronaut.core.util.StringUtils.isNotEmpty(include)) {
-            String trimmed = include.trim();
-            if (!trimmed.contains("(")) {
-                resolvedInclude = "tickets(" + trimmed + ")";
-            } else {
-                resolvedInclude = trimmed;
-            }
-        }
-        log.info("MCP Tool called: search(query='{}', include='{}', maxResults={})", query, resolvedInclude, limit);
-
-        SearchResponse accumulatedResponse = new SearchResponse();
-        accumulatedResponse.setResults(new java.util.ArrayList<>());
-        accumulatedResponse.setUsers(new java.util.ArrayList<>());
-        accumulatedResponse.setOrganizations(new java.util.ArrayList<>());
-        accumulatedResponse.setGroups(new java.util.ArrayList<>());
-
-        int p = 1;
-        while (accumulatedResponse.getResults().size() < limit) {
-            SearchResponse pageResponse = searchClient.list(query, resolvedInclude, null, null, p, 100)
-                    .block();
-
-            if (pageResponse == null || pageResponse.getResults() == null || pageResponse.getResults().isEmpty()) {
-                break;
-            }
-
-            accumulatedResponse.getResults().addAll(pageResponse.getResults());
-            if (pageResponse.getUsers() != null) accumulatedResponse.getUsers().addAll(pageResponse.getUsers());
-            if (pageResponse.getOrganizations() != null) accumulatedResponse.getOrganizations().addAll(pageResponse.getOrganizations());
-            if (pageResponse.getGroups() != null) accumulatedResponse.getGroups().addAll(pageResponse.getGroups());
-
-            if (pageResponse.getNextPage() == null) {
-                break;
-            }
-            p++;
-        }
-
-        if (accumulatedResponse.getResults().size() > limit) {
-            accumulatedResponse.setResults(accumulatedResponse.getResults().subList(0, limit));
-        }
-        accumulatedResponse.setCount(accumulatedResponse.getResults().size());
-
-        return accumulatedResponse;
-    }
-
-    @Tool(description = "Get the count of search results matching a query in Zendesk")
-    public SearchResponse searchCount(
-            @ToolArg(description = "Zendesk search query string, e.g. 'type:ticket status:open'") String query
-    ) {
-        if (query != null && query.toLowerCase().contains("problem_id:")) {
-            throw new IllegalArgumentException("Zendesk search does not support filtering by problem_id. The search index does not cover this field, and queries will silently return 0 results. If you need to find incidents linked to a problem, you must retrieve tickets individually or use a different discovery mechanism.");
-        }
-        log.info("MCP Tool called: searchCount(query='{}')", query);
-        return searchClient.count(query).block();
-    }
-
-    private List<String> resolveUploadTokens(List<String> uploadTokens, List<String> attachmentFilePaths) {
-        List<String> tokens = new ArrayList<>();
-        if (uploadTokens != null) {
-            tokens.addAll(uploadTokens);
-        }
-        if (attachmentFilePaths != null) {
-            for (String filePath : attachmentFilePaths) {
-                if (StringUtils.isNotEmpty(filePath)) {
-                    AttachmentUploadResponse uploadResp = uploadAttachment(filePath, null);
-                    if (uploadResp != null && uploadResp.getUpload() != null && uploadResp.getUpload().getToken() != null) {
-                        tokens.add(uploadResp.getUpload().getToken());
-                    }
-                }
-            }
-        }
-        return tokens;
-    }
-
-    @Tool(description = "Create a new Zendesk ticket")
     public TicketResponse createTicket(
-            @ToolArg(description = "The subject of the ticket") String subject,
-            @ToolArg(description = "The initial comment / description of the ticket") @Nullable String comment,
-            @ToolArg(description = "Required. Whether the initial comment is public (true) or private internal note (false)") Boolean isPublic,
-            @ToolArg(description = "Priority: urgent, high, normal, low") @Nullable String priority,
-            @ToolArg(description = "Status: new, open, pending, hold, solved, closed") @Nullable String status,
-            @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
-            @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
-            @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
-            @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
-            @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
-            @ToolArg(description = "Optional numeric ID of a custom ticket status (from listCustomStatuses)") @Nullable Long customStatusId,
-            @ToolArg(description = "Optional numeric ticket form ID to specify the form used for this ticket") @Nullable Long ticketFormId,
+            String subject,
+            @Nullable String comment,
+            Boolean isPublic,
+            @Nullable String priority,
+            @Nullable String status,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
             CallToolRequest request
     ) {
-        log.info("MCP Tool called: createTicket(subject='{}')", subject);
-        validateKnownParameters(request, "createTicket", "subject", "comment", "isPublic", "priority", "status", "uploadTokens", "attachmentFilePaths", "customFields", "requesterId", "type", "description", "customStatusId", "custom_status_id", "ticketFormId", "ticket_form_id");
-
-        String initialComment = comment;
-        if (request != null && request.arguments() != null && request.arguments().containsKey("description")) {
-            Object descObj = request.arguments().get("description");
-            String desc = descObj != null ? descObj.toString() : null;
-            if (StringUtils.isNotEmpty(desc)) {
-                if (StringUtils.isNotEmpty(initialComment) && !initialComment.equals(desc)) {
-                    throw new IllegalArgumentException("Provide either 'comment' or 'description' for the initial ticket message, not both with different content.");
-                }
-                if (StringUtils.isEmpty(initialComment)) {
-                    initialComment = desc;
-                }
-            }
-        }
-
-        List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
-        if (StringUtils.isEmpty(initialComment) && tokens.isEmpty()) {
-            throw new IllegalArgumentException("Either 'comment' or 'description' is required when creating a ticket.");
-        }
-
-        if (isPublic == null) {
-            throw new IllegalArgumentException("isPublic is required when creating a ticket. Set to true for a public initial comment, or false for an internal note.");
-        }
-        if (StringUtils.isEmpty(subject) || subject.isBlank()) {
-            throw new IllegalArgumentException("Ticket 'subject' is required and cannot be empty.");
-        }
-
-        TicketComment ticketComment = new TicketComment().setBody(initialComment);
-        ticketComment.setIsPublic(isPublic);
-        if (!tokens.isEmpty()) {
-            ticketComment.setUploads(tokens);
-        }
-        TicketCreateInput input = new TicketCreateInput(ticketComment);
-        input.setSubject(subject);
-        input.setRawSubject(subject);
-
-        if (StringUtils.isNotEmpty(priority)) {
-            try {
-                input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-            } catch (Exception _) {
-                log.warn("Unknown priority '{}', ignoring", priority);
-            }
-        }
-        if (StringUtils.isNotEmpty(status)) {
-            try {
-                input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-            } catch (Exception _) {
-                log.warn("Unknown status '{}', ignoring", status);
-            }
-        }
-        List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-        if (!parsedCustomFields.isEmpty()) {
-            input.setCustomFields(parsedCustomFields);
-        }
-        if (requesterId != null) {
-            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
-                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
-            }
-            input.setRequesterId(requesterId.intValue());
-        }
-        if (StringUtils.isNotEmpty(type)) {
-            if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
-                input.setType(null);
-            } else {
-                TicketUpdateInputType parsedType = parseTicketType(type);
-                input.setType(parsedType);
-            }
-        }
-
-        final Long resolvedTicketFormId = resolveTicketFormId(ticketFormId, request);
-        if (resolvedTicketFormId != null) {
-            validateTicketFormBounds(resolvedTicketFormId);
-            validateTicketForm(resolvedTicketFormId);
-            input.setTicketFormId(resolvedTicketFormId);
-        }
-
-        final Long resolvedCustomStatusId = resolveCustomStatusId(customStatusId, request);
-        if (resolvedCustomStatusId != null) {
-            validateCustomStatusBounds(resolvedCustomStatusId);
-            TicketFieldCustomStatusObject validated = validateCustomStatus(resolvedCustomStatusId, StringUtils.isNotEmpty(status) ? status : "new");
-            if (resolvedTicketFormId != null && validated != null) {
-                validateCustomStatusForForm(validated, resolvedTicketFormId);
-            }
-            input.setCustomStatusId(resolvedCustomStatusId.intValue());
-        }
-
-        return ticketClient.createTicket(new TicketCreateRequest(input)).block();
+        return ticketTools.createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, customStatusId, ticketFormId, request);
     }
 
     public TicketResponse createTicket(
@@ -414,9 +216,8 @@ public class ZendeskTools {
             @Nullable Long customStatusId,
             CallToolRequest request
     ) {
-        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, customStatusId, null, request);
+        return ticketTools.createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, customStatusId, request);
     }
-
 
     public TicketResponse createTicket(
             String subject,
@@ -427,7 +228,7 @@ public class ZendeskTools {
             List<String> uploadTokens,
             List<String> attachmentFilePaths
     ) {
-        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, null, null, null, null, (CallToolRequest) null);
+        return ticketTools.createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths);
     }
 
     public TicketResponse createTicket(
@@ -442,7 +243,7 @@ public class ZendeskTools {
             Long requesterId,
             String type
     ) {
-        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, null, (CallToolRequest) null);
+        return ticketTools.createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type);
     }
 
     public TicketResponse createTicket(
@@ -458,218 +259,508 @@ public class ZendeskTools {
             String type,
             CallToolRequest request
     ) {
-        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, null, request);
+        return ticketTools.createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, request);
     }
 
-    private Long resolveCustomStatusId(Long customStatusId, @Nullable CallToolRequest request) {
-        if (customStatusId != null) {
-            return customStatusId;
-        }
-        if (request != null && request.arguments() != null && request.arguments().containsKey("custom_status_id")) {
-            Object val = request.arguments().get("custom_status_id");
-            if (val instanceof Number num) {
-                return num.longValue();
-            } else if (val != null) {
-                try {
-                    return Long.parseLong(val.toString().trim());
-                } catch (NumberFormatException _) {
-                    throw new IllegalArgumentException("custom_status_id must be a numeric ID, got: " + val);
-                }
-            }
-        }
-        return null;
+    public TicketUpdateResponse updateTicket(Long ticketId, TicketMutationOptions options, CallToolRequest request) {
+        return ticketTools.updateTicket(ticketId, options, request);
     }
 
-    private void validateCustomStatusBounds(Long customStatusId) {
-        if (customStatusId == null) return;
-        if (customStatusId <= 0) {
-            throw new IllegalArgumentException("customStatusId must be a positive integer, got: " + customStatusId);
-        }
-        if (customStatusId > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("customStatusId " + customStatusId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits custom_status_id on ticket inputs to 32-bit integers.");
-        }
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
+            CallToolRequest request
+    ) {
+        return ticketTools.updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, request);
     }
 
-    private Long resolveTicketFormId(Long ticketFormId, @Nullable CallToolRequest request) {
-        if (ticketFormId != null) {
-            return ticketFormId;
-        }
-        if (request != null && request.arguments() != null) {
-            if (request.arguments().containsKey("ticket_form_id")) {
-                Object val = request.arguments().get("ticket_form_id");
-                if (val instanceof Number num) {
-                    return num.longValue();
-                } else if (val != null) {
-                    try {
-                        return Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {
-                        throw new IllegalArgumentException("ticket_form_id must be a numeric ID, got: " + val);
-                    }
-                }
-            } else if (request.arguments().containsKey("ticketFormId")) {
-                Object val = request.arguments().get("ticketFormId");
-                if (val instanceof Number num) {
-                    return num.longValue();
-                } else if (val != null) {
-                    try {
-                        return Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {
-                        throw new IllegalArgumentException("ticketFormId must be a numeric ID, got: " + val);
-                    }
-                }
-            }
-        }
-        return null;
+    public TicketUpdateResponse updateTicket(Long ticketId, TicketMutationOptions options) {
+        return ticketTools.updateTicket(ticketId, options);
     }
 
-    private void validateTicketFormBounds(Long ticketFormId) {
-        if (ticketFormId == null) return;
-        if (ticketFormId <= 0) {
-            throw new IllegalArgumentException("ticketFormId must be a positive integer, got: " + ticketFormId);
-        }
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            CallToolRequest request
+    ) {
+        return ticketTools.updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, request);
+    }
+
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type,
+            CallToolRequest request
+    ) {
+        return ticketTools.updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, request);
+    }
+
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            CallToolRequest request
+    ) {
+        return ticketTools.updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, request);
+    }
+
+    public TicketUpdateResponse updateTicket(
+            Long ticketId,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields
+    ) {
+        return ticketTools.updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields);
+    }
+
+    public AttachmentUploadResponse uploadAttachment(String filePath, @Nullable String filename, @Nullable CallToolRequest request) {
+        return ticketTools.uploadAttachment(filePath, filename, request);
+    }
+
+    public AttachmentUploadResponse uploadAttachment(String filePath, @Nullable String filename) {
+        return ticketTools.uploadAttachment(filePath, filename);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(List<Long> ticketIds, TicketMutationOptions options, Boolean async, CallToolRequest request) {
+        return ticketTools.batchUpdateTickets(ticketIds, options, async, request);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Boolean async,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
+            CallToolRequest request
+    ) {
+        return ticketTools.batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, async, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, request);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(List<Long> ticketIds, TicketMutationOptions options) {
+        return ticketTools.batchUpdateTickets(ticketIds, options);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(List<Long> ticketIds, TicketMutationOptions options, Boolean async) {
+        return ticketTools.batchUpdateTickets(ticketIds, options, async);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Boolean async,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            CallToolRequest request
+    ) {
+        return ticketTools.batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, async, problemId, convertToIncident, customFields, requesterId, type, customStatusId, request);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean async,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type,
+            CallToolRequest request
+    ) {
+        return ticketTools.batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, async, problemId, convertToIncident, customFields, requesterId, type, request);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean async,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            Long requesterId,
+            String type
+    ) {
+        return ticketTools.batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, async, problemId, convertToIncident, customFields, requesterId, type);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean async,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields,
+            CallToolRequest request
+    ) {
+        return ticketTools.batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, async, problemId, convertToIncident, customFields, request);
+    }
+
+    public BatchUpdateResponse batchUpdateTickets(
+            List<Long> ticketIds,
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> uploadTokens,
+            List<String> attachmentFilePaths,
+            Boolean async,
+            Long problemId,
+            Boolean convertToIncident,
+            List<Map<String, Object>> customFields
+    ) {
+        return ticketTools.batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, async, problemId, convertToIncident, customFields);
+    }
+
+    public JobStatusResponse getJobStatus(String jobId) {
+        return ticketTools.getJobStatus(jobId);
+    }
+
+    public TicketFieldsResponse listTicketFields() {
+        return ticketTools.listTicketFields();
+    }
+
+    public TicketFieldResponse getTicketField(Long fieldId) {
+        return ticketTools.getTicketField(fieldId);
+    }
+
+    public TicketAuditsResponse getTicketAudits(Long ticketId) {
+        return ticketTools.getTicketAudits(ticketId);
+    }
+
+    // Search
+    public SearchResponse search(String query, @Nullable String include, @Nullable Integer maxResults) {
+        return searchTools.search(query, include, maxResults);
+    }
+
+    public SearchResponse searchCount(String query) {
+        return searchTools.searchCount(query);
+    }
+
+    // Views
+    public ViewsResponse listViews() {
+        return viewTools.listViews();
+    }
+
+    public TicketsResponse getViewTickets(Long viewId) {
+        return viewTools.getViewTickets(viewId);
+    }
+
+    public ViewsResponse listActiveViews() {
+        return viewTools.listActiveViews();
+    }
+
+    public ViewResponse getView(Long viewId) {
+        return viewTools.getView(viewId);
+    }
+
+    public ViewExecuteResponse executeView(Long viewId) {
+        return viewTools.executeView(viewId);
+    }
+
+    public ViewCountResponse getViewTicketCount(Long viewId) {
+        return viewTools.getViewTicketCount(viewId);
+    }
+
+    // Help Center
+    public ArticleResponse getArticle(Long articleId, @Nullable String locale) {
+        return helpCenterTools.getArticle(articleId, locale);
+    }
+
+    public ArticlesResponse listArticles(
+            @Nullable String locale,
+            @Nullable String sortBy,
+            @Nullable String sortOrder,
+            @Nullable Long startTime,
+            @Nullable String labelNames
+    ) {
+        return helpCenterTools.listArticles(locale, sortBy, sortOrder, startTime, labelNames);
+    }
+
+    public ArticleResponse createArticle(
+            Long sectionId,
+            String title,
+            String body,
+            Long permissionGroupId,
+            @Nullable String locale,
+            @Nullable Boolean draft,
+            @Nullable List<String> labelNames,
+            @Nullable Long userSegmentId
+    ) {
+        return helpCenterTools.createArticle(sectionId, title, body, permissionGroupId, locale, draft, labelNames, userSegmentId);
+    }
+
+    public ArticleResponse updateArticle(
+            Long articleId,
+            @Nullable String title,
+            @Nullable String body,
+            @Nullable String locale,
+            @Nullable Boolean draft,
+            @Nullable Long permissionGroupId,
+            @Nullable List<String> labelNames,
+            @Nullable Long userSegmentId
+    ) {
+        return helpCenterTools.updateArticle(articleId, title, body, locale, draft, permissionGroupId, labelNames, userSegmentId);
+    }
+
+    public Map<String, Object> deleteArticle(Long articleId, @Nullable Boolean confirm, @Nullable String locale) {
+        return helpCenterTools.deleteArticle(articleId, confirm, locale);
+    }
+
+    public TranslationsResponse listTranslations(String resourceType, Long resourceId) {
+        return helpCenterTools.listTranslations(resourceType, resourceId);
+    }
+
+    public TranslationResponse getTranslation(String resourceType, Long resourceId, @Nullable String locale) {
+        return helpCenterTools.getTranslation(resourceType, resourceId, locale);
+    }
+
+    public CategoriesResponse listCategories(@Nullable String locale) {
+        return helpCenterTools.listCategories(locale);
+    }
+
+    public CategoryResponse getCategory(Long categoryId, @Nullable String locale) {
+        return helpCenterTools.getCategory(categoryId, locale);
+    }
+
+    // Community
+    public TopicsResponse listCommunityTopics() {
+        return communityTools.listCommunityTopics();
+    }
+
+    public TopicResponse getCommunityTopic(Long topicId) {
+        return communityTools.getCommunityTopic(topicId);
+    }
+
+    public PostsResponse listCommunityPosts(@Nullable Long topicId) {
+        return communityTools.listCommunityPosts(topicId);
+    }
+
+    public PostResponse getCommunityPost(Long postId) {
+        return communityTools.getCommunityPost(postId);
+    }
+
+    public CommunityPostSearchResponse searchCommunityPosts(String query) {
+        return communityTools.searchCommunityPosts(query);
+    }
+
+    public PostCommentsResponse listCommunityPostComments(Long postId) {
+        return communityTools.listCommunityPostComments(postId);
+    }
+
+    // Custom Objects
+    public CustomObjectsResponse listCustomObjects() {
+        return customObjectTools.listCustomObjects();
+    }
+
+    public CustomObjectResponse getCustomObject(String customObjectKey) {
+        return customObjectTools.getCustomObject(customObjectKey);
+    }
+
+    public CustomObjectRecordsResponse listCustomObjectRecords(String customObjectKey) {
+        return customObjectTools.listCustomObjectRecords(customObjectKey);
+    }
+
+    public CustomObjectRecordResponse getCustomObjectRecord(String customObjectKey, String recordId) {
+        return customObjectTools.getCustomObjectRecord(customObjectKey, recordId);
+    }
+
+    public CustomObjectRecordsResponse searchCustomObjectRecords(String customObjectKey, String query) {
+        return customObjectTools.searchCustomObjectRecords(customObjectKey, query);
+    }
+
+    // Metadata
+    public Map<String, Object> listCustomStatuses(
+            @Nullable String statusCategory,
+            @Nullable Long ticketFormId,
+            @Nullable Boolean includeInactive,
+            @Nullable Boolean fullPayload,
+            @Nullable CallToolRequest request
+    ) {
+        return metadataTools.listCustomStatuses(statusCategory, ticketFormId, includeInactive, fullPayload, request);
+    }
+
+    public Map<String, Object> listCustomStatuses(
+            @Nullable String statusCategory,
+            @Nullable Boolean includeInactive,
+            @Nullable Boolean fullPayload,
+            @Nullable CallToolRequest request
+    ) {
+        return metadataTools.listCustomStatuses(statusCategory, includeInactive, fullPayload, request);
+    }
+
+    public Map<String, Object> listCustomStatuses(
+            @Nullable String statusCategory,
+            @Nullable Long ticketFormId,
+            @Nullable Boolean includeInactive,
+            @Nullable Boolean fullPayload
+    ) {
+        return metadataTools.listCustomStatuses(statusCategory, ticketFormId, includeInactive, fullPayload);
+    }
+
+    public Map<String, Object> listCustomStatuses(
+            @Nullable String statusCategory,
+            @Nullable Boolean includeInactive,
+            @Nullable Boolean fullPayload
+    ) {
+        return metadataTools.listCustomStatuses(statusCategory, includeInactive, fullPayload);
+    }
+
+    public Map<String, Object> listCustomStatuses() {
+        return metadataTools.listCustomStatuses();
+    }
+
+    public Map<String, Object> listStatusCategories() {
+        return metadataTools.listStatusCategories();
+    }
+
+    public Map<String, Object> listStatusCategories(@Nullable Long ticketFormId) {
+        return metadataTools.listStatusCategories(ticketFormId);
+    }
+
+    public Map<String, Object> listTicketForms() {
+        return metadataTools.listTicketForms();
+    }
+
+    public Map<String, Object> listTicketForms(@Nullable Boolean includeInactive, @Nullable Boolean fullPayload) {
+        return metadataTools.listTicketForms(includeInactive, fullPayload);
+    }
+
+    public TicketFormResponse getTicketForm(Long ticketFormId) {
+        return metadataTools.getTicketForm(ticketFormId);
     }
 
     public void clearCustomStatusCache() {
-        metadataService.clearCustomStatusCache();
+        metadataTools.clearCustomStatusCache();
     }
 
     public void clearTicketFormCache() {
-        metadataService.clearTicketFormCache();
+        metadataTools.clearTicketFormCache();
     }
 
     public void clearAllCaches() {
-        metadataService.clearAllCaches();
+        metadataTools.clearAllCaches();
     }
 
     List<TicketFieldCustomStatusObject> getCachedCustomStatuses(boolean forceRefresh) {
-        return metadataService.getCachedCustomStatuses(forceRefresh);
+        return metadataTools.getCachedCustomStatuses(forceRefresh);
     }
 
     List<TicketFormStatus> getCachedTicketFormStatuses(boolean forceRefresh) {
-        return metadataService.getCachedTicketFormStatuses(forceRefresh);
+        return metadataTools.getCachedTicketFormStatuses(forceRefresh);
     }
 
     List<TicketForm> getCachedTicketForms(boolean forceRefresh) {
-        return metadataService.getCachedTicketForms(forceRefresh);
+        return metadataTools.getCachedTicketForms(forceRefresh);
     }
 
-    private TicketForm validateTicketForm(Long ticketFormId) {
-        return metadataService.validateTicketForm(ticketFormId);
+    // Package-private helpers for backwards-compatible test validation
+    Path validateAndResolveFilePath(String filePath) {
+        return ticketTools.validateAndResolveFilePath(filePath);
     }
 
-    private TicketFieldCustomStatusObject validateCustomStatus(Long customStatusId, @Nullable String targetStatus) {
-        return metadataService.validateCustomStatus(customStatusId, targetStatus);
+    String resolveTargetFilename(Path path, @Nullable String filename) {
+        return ticketTools.resolveTargetFilename(path, filename);
     }
 
-    private void validateTicketCustomStatusCategoryMatch(Long ticketId, Ticket currentTicket, TicketFieldCustomStatusObject customStatus, Long customStatusId) {
-        metadataService.validateTicketCustomStatusCategoryMatch(ticketId, currentTicket, customStatus, customStatusId);
+    void validateFilenameExtension(String filename) {
+        ticketTools.validateFilenameExtension(filename);
     }
 
-    private void validateCustomStatusForForm(TicketFieldCustomStatusObject customStatus, Long ticketFormId) {
-        metadataService.validateCustomStatusForForm(customStatus, ticketFormId);
+    String probeContentType(Path path, String targetFilename) {
+        return ticketTools.probeContentType(path, targetFilename);
     }
 
-    private TicketUpdateInputType parseTicketType(String type) {
-        if (type != null) {
-            String normalized = type.trim().toLowerCase();
-            if ("problem".equals(normalized) || TYPE_INCIDENT.equals(normalized) || "question".equals(normalized) || "task".equals(normalized)) {
-                return TicketUpdateInputType.fromValue(normalized);
-            }
-        }
-        throw new IllegalArgumentException("Invalid ticket type: '" + type + "'. Allowed types are: problem, incident, question, task.");
+    List<TicketCustomField> parseCustomFields(List<Map<String, Object>> customFields) {
+        return ticketTools.parseCustomFields(customFields);
     }
 
-    private void validateKnownParameters(CallToolRequest request, String toolName, String... knownParams) {
-        if (request == null || request.arguments() == null) return;
-        Set<String> known = new HashSet<>(Arrays.asList(knownParams));
-        if (request.arguments().containsKey("description") && !known.contains("description")) {
-            throw new IllegalArgumentException("Ticket description cannot be modified after creation as it is read-only in Zendesk. To add information to an existing ticket, use the 'comment' parameter instead.");
-        }
-        for (String key : request.arguments().keySet()) {
-            if (!known.contains(key)) {
-                String hint;
-                if ("uploadAttachment".equals(toolName)) {
-                    hint = "Valid parameters for uploadAttachment are 'filePath' and 'filename'.";
-                } else if ("createTicket".equals(toolName)) {
-                    hint = "If you meant to set a custom field, use the 'customFields' array parameter.";
-                } else {
-                    hint = "If you meant to update a custom field, use the 'customFields' array parameter.";
-                }
-                throw new IllegalArgumentException("Unrecognized parameter: '" + key + "'. " + hint);
-            }
-        }
+    List<String> resolveUploadTokens(List<String> uploadTokens, List<String> attachmentFilePaths) {
+        return ticketTools.resolveUploadTokens(uploadTokens, attachmentFilePaths);
     }
 
-    private void validateTicketTypeChange(Ticket currentTicket, TicketUpdateInputType newType, boolean isTypeUnset) {
-        if (currentTicket == null) return;
-        if (currentTicket.getType() == TicketType.PROBLEM && Boolean.TRUE.equals(currentTicket.getHasIncidents())) {
-            if (isTypeUnset || newType != TicketUpdateInputType.PROBLEM) {
-                throw new IllegalArgumentException("ticket #" + currentTicket.getId() + " is a parent problem with linked incidents — reassign or resolve those first");
-            }
-        }
+    TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
+        return ticketTools.buildInputFromParams(comment, status, priority, isPublic, tokens, customFields);
     }
 
-    private List<TicketCustomField> parseCustomFields(List<Map<String, Object>> customFields) {
-        if (customFields == null || customFields.isEmpty()) return Collections.emptyList();
-        List<TicketCustomField> result = new ArrayList<>();
-        for (Map<String, Object> cf : customFields) {
-            if (cf == null) continue;
-            Object idObj = cf.get("id");
-            Object value = cf.get("value");
-            if (idObj == null) throw new IllegalArgumentException("Custom field must have an 'id'");
-            Long id;
-            if (idObj instanceof Number number) {
-                id = number.longValue();
-            } else {
-                try {
-                    id = Long.parseLong(idObj.toString().trim());
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("Custom field 'id' must be a numeric ID, got: '" + idObj + "'", e);
-                }
-            }
-            result.add(new TicketCustomField.Raw(id, value));
-        }
-        return result;
-    }
-
-    private TicketUpdateInput populateInputFromParams(TicketUpdateInput input, String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
-        if (StringUtils.isNotEmpty(comment) || !tokens.isEmpty()) {
-            if (isPublic == null) {
-                throw new IllegalArgumentException("isPublic is required when a comment or attachment is provided. Set to true for a public reply, or false for an internal note.");
-            }
-            TicketComment ticketComment = new TicketComment();
-            if (StringUtils.isNotEmpty(comment)) {
-                ticketComment.setBody(comment);
-            }
-            ticketComment.setIsPublic(isPublic);
-            if (!tokens.isEmpty()) {
-                ticketComment.setUploads(tokens);
-            }
-            input.setComment(ticketComment);
-        }
-        if (StringUtils.isNotEmpty(status)) {
-            try {
-                input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
-            } catch (Exception _) {
-                log.warn("Unknown status '{}', ignoring", status);
-            }
-        }
-        if (StringUtils.isNotEmpty(priority)) {
-            try {
-                input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
-            } catch (Exception _) {
-                log.warn("Unknown priority '{}', ignoring", priority);
-            }
-        }
-        if (customFields != null && !customFields.isEmpty()) { input.setCustomFields(customFields); }
-        return input;
-    }
-
-    private TicketUpdateInput buildInputFromParams(String comment, String status, String priority, Boolean isPublic, List<String> tokens, List<TicketCustomField> customFields) {
-        return populateInputFromParams(new TicketUpdateInput(), comment, status, priority, isPublic, tokens, customFields);
-    }
-
-    private TicketUpdateInput buildTicketUpdateInput(
+    TicketUpdateInput buildTicketUpdateInput(
             String comment,
             String status,
             String priority,
@@ -682,40 +773,10 @@ public class ZendeskTools {
             Long customStatusId,
             Long ticketFormId
     ) {
-        TicketUpdateInput input;
-        if (ticketFormId != null) {
-            TicketUpdateInputWithForm formInput = new TicketUpdateInputWithForm();
-            formInput.setTicketFormId(ticketFormId);
-            input = formInput;
-        } else {
-            input = new TicketUpdateInput();
-        }
-        populateInputFromParams(input, comment, status, priority, isPublic, tokens, customFields);
-
-        if (requesterId != null) {
-            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
-                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
-            }
-            input.setRequesterId(requesterId.intValue());
-        }
-
-        if (type != null) {
-            if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
-                input.setType(null);
-            } else {
-                input.setType(parseTicketType(type));
-            }
-        } else if (Boolean.TRUE.equals(convertToIncident)) {
-            input.setType(TicketUpdateInputType.INCIDENT);
-        }
-
-        if (customStatusId != null) {
-            input.setCustomStatusId(customStatusId.intValue());
-        }
-        return input;
+        return ticketTools.buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident, customStatusId, ticketFormId);
     }
 
-    private TicketUpdateInput buildTicketUpdateInput(
+    TicketUpdateInput buildTicketUpdateInput(
             String comment,
             String status,
             String priority,
@@ -727,10 +788,10 @@ public class ZendeskTools {
             Boolean convertToIncident,
             Long customStatusId
     ) {
-        return buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident, customStatusId, null);
+        return ticketTools.buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident, customStatusId);
     }
 
-    private TicketUpdateInput buildTicketUpdateInput(
+    TicketUpdateInput buildTicketUpdateInput(
             String comment,
             String status,
             String priority,
@@ -741,1324 +802,22 @@ public class ZendeskTools {
             String type,
             Boolean convertToIncident
     ) {
-        return buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident, null, null);
+        return ticketTools.buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident);
     }
 
-    private void validateProblemTypeConflict(Long problemId, String type) {
-        if (problemId != null && type != null && !TYPE_INCIDENT.equalsIgnoreCase(type.trim())) {
-            throw new IllegalArgumentException("Cannot specify type '" + type + "' when linking to a problem ticket. Linked tickets must be of type 'incident'.");
-        }
+    String validateResourceType(String resourceType) {
+        return helpCenterTools.validateResourceType(resourceType);
     }
 
-    private static boolean isTypeUnset(String type) {
-        return type != null && (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty());
+    LocaleAbbreviation resolveLocale(@Nullable String locale) {
+        return helpCenterTools.resolveLocale(locale);
     }
 
-    private void validateProblemTarget(Long problemId) {
-        if (problemId == null) return;
-        if (problemId <= 0) {
-            throw new IllegalArgumentException("problemId must be a positive integer, got: " + problemId);
-        }
-        if (problemId > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("problemId " + problemId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits problem_id on ticket inputs to 32-bit integers.");
-        }
-        try {
-            Ticket problemTicket = ticketClient.showTicket(problemId).block().getTicket();
-            if (problemTicket.getType() != TicketType.PROBLEM) {
-                throw new IllegalArgumentException("Target ticket #" + problemId + " is not of type 'problem'");
-            }
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception _) {
-            throw new IllegalArgumentException("Target problem ticket #" + problemId + " could not be retrieved. Does it exist?");
-        }
+    SortArticleBy resolveSortArticleBy(@Nullable String sortBy) {
+        return helpCenterTools.resolveSortArticleBy(sortBy);
     }
 
-    private void applyProblemIdLogic(Ticket currentTicket, TicketUpdateInput input, Long problemId, Boolean convertToIncident) {
-        if (problemId == null) return;
-        TicketType currentType = currentTicket.getType();
-        boolean isProblemParent = currentType == TicketType.PROBLEM && Boolean.TRUE.equals(currentTicket.getHasIncidents());
-        
-        if (isProblemParent) {
-            throw new IllegalArgumentException("ticket #" + currentTicket.getId() + " is a parent problem with linked incidents — reassign or resolve those first");
-        }
-        
-        if (currentType != TicketType.INCIDENT) {
-            if (!Boolean.TRUE.equals(convertToIncident)) {
-                throw new IllegalArgumentException("Ticket #" + currentTicket.getId() + " is not an incident. Pass convertToIncident=true to explicitly convert it.");
-            }
-        }
-        input.setType(TicketUpdateInputType.INCIDENT);
-        input.setProblemId(problemId.intValue());
+    SortOrder resolveSortOrder(@Nullable String sortOrder) {
+        return helpCenterTools.resolveSortOrder(sortOrder);
     }
-
-    @Tool(description = "Update an existing Zendesk ticket with a comment, status, priority, attachments, custom status, ticket form, or link to a problem ticket")
-    public TicketUpdateResponse updateTicket(
-            @ToolArg(description = "The numeric ticket ID to update") Long ticketId,
-            @ToolArg(description = "Comment text to add to the ticket") @Nullable String comment,
-            @ToolArg(description = "New status: new, open, pending, hold, solved, closed") @Nullable String status,
-            @ToolArg(description = "New priority: urgent, high, normal, low") @Nullable String priority,
-            @ToolArg(description = "Required if a comment or attachment is provided. Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
-            @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
-            @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
-            @ToolArg(description = "Optional ID of the parent problem ticket to link this incident to") @Nullable Long problemId,
-            @ToolArg(description = "Required if setting problemId on a ticket that is not currently an incident. Set to true to explicitly convert it.") @Nullable Boolean convertToIncident,
-            @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
-            @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
-            @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
-            @ToolArg(description = "Optional numeric ID of a custom ticket status (from listCustomStatuses)") @Nullable Long customStatusId,
-            @ToolArg(description = "Optional numeric ticket form ID to change the form used for this ticket") @Nullable Long ticketFormId,
-            CallToolRequest request
-    ) {
-        TicketMutationOptions options = TicketMutationOptions.builder()
-                .comment(comment)
-                .status(status)
-                .priority(priority)
-                .isPublic(isPublic)
-                .uploadTokens(uploadTokens)
-                .attachmentFilePaths(attachmentFilePaths)
-                .problemId(problemId)
-                .convertToIncident(convertToIncident)
-                .customFields(customFields)
-                .requesterId(requesterId)
-                .type(type)
-                .customStatusId(customStatusId)
-                .ticketFormId(ticketFormId)
-                .build();
-        return updateTicket(ticketId, options, request);
-    }
-
-    public TicketUpdateResponse updateTicket(
-            Long ticketId,
-            TicketMutationOptions options,
-            @Nullable CallToolRequest request
-    ) {
-        if (options == null) {
-            options = TicketMutationOptions.builder().build();
-        }
-        log.info("MCP Tool called: updateTicket(id={})", ticketId);
-        List<String> tokens = resolveUploadTokens(options.uploadTokens(), options.attachmentFilePaths());
-        validateKnownParameters(request, "updateTicket", "ticketId", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "problemId", "convertToIncident", "customFields", "requesterId", "type", "customStatusId", "custom_status_id", "ticketFormId", "ticket_form_id");
-        validateProblemTypeConflict(options.problemId(), options.type());
-        validateProblemTarget(options.problemId());
-
-        final Long resolvedTicketFormId = resolveTicketFormId(options.ticketFormId(), request);
-        if (resolvedTicketFormId != null) {
-            validateTicketFormBounds(resolvedTicketFormId);
-            validateTicketForm(resolvedTicketFormId);
-        }
-
-        final Long resolvedCustomStatusId = resolveCustomStatusId(options.customStatusId(), request);
-        TicketFieldCustomStatusObject validatedCustomStatus = null;
-        if (resolvedCustomStatusId != null) {
-            validateCustomStatusBounds(resolvedCustomStatusId);
-            validatedCustomStatus = validateCustomStatus(resolvedCustomStatusId, options.status());
-            if (resolvedTicketFormId != null) {
-                validateCustomStatusForForm(validatedCustomStatus, resolvedTicketFormId);
-            }
-        }
-
-        List<TicketCustomField> parsedCustomFields = parseCustomFields(options.customFields());
-        TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId);
-
-        final boolean isTypeUnset = isTypeUnset(options.type());
-        final TicketUpdateInputType parsedType = (options.type() != null && !isTypeUnset) ? parseTicketType(options.type()) : null;
-
-        boolean needsCurrentTicket = options.problemId() != null || (options.type() != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM)) || (resolvedCustomStatusId != null && StringUtils.isEmpty(options.status()));
-        if (needsCurrentTicket) {
-            Mono<TicketResponse> showMono = ticketClient.showTicket(ticketId);
-            TicketResponse showResp = showMono != null ? showMono.block() : null;
-            if (showResp == null || showResp.getTicket() == null) {
-                throw new IllegalArgumentException("Ticket #" + ticketId + " could not be retrieved. Does it exist?");
-            }
-            Ticket currentTicket = showResp.getTicket();
-            if (options.type() != null) {
-                validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
-            }
-            if (options.problemId() != null) {
-                applyProblemIdLogic(currentTicket, input, options.problemId(), options.convertToIncident());
-            }
-            if (resolvedCustomStatusId != null && StringUtils.isEmpty(options.status())) {
-                validateTicketCustomStatusCategoryMatch(ticketId, currentTicket, validatedCustomStatus, resolvedCustomStatusId);
-            }
-            Long formIdToValidate = resolvedTicketFormId != null ? resolvedTicketFormId : currentTicket.getTicketFormId();
-            if (validatedCustomStatus != null && formIdToValidate != null) {
-                validateCustomStatusForForm(validatedCustomStatus, formIdToValidate);
-            }
-        }
-
-        return ticketClient.updateTicket(ticketId, new TicketUpdateRequest(input)).block();
-    }
-
-    public TicketUpdateResponse updateTicket(
-            Long ticketId,
-            TicketMutationOptions options
-    ) {
-        return updateTicket(ticketId, options, null);
-    }
-
-    public TicketUpdateResponse updateTicket(
-            Long ticketId,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields,
-            Long requesterId,
-            String type,
-            Long customStatusId,
-            CallToolRequest request
-    ) {
-        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, null, request);
-    }
-
-    public TicketUpdateResponse updateTicket(
-            Long ticketId,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields,
-            Long requesterId,
-            String type,
-            CallToolRequest request
-    ) {
-        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, null, request);
-    }
-
-    public TicketUpdateResponse updateTicket(
-            Long ticketId,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields,
-            CallToolRequest request
-    ) {
-        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null, request);
-    }
-
-    public TicketUpdateResponse updateTicket(
-            Long ticketId,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields
-    ) {
-        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, null, null, null, (CallToolRequest) null);
-    }
-    public static final long MAX_ATTACHMENT_SIZE_BYTES = 50L * 1024 * 1024; // 50MB
-
-    static final Map<String, String> EXTENSION_MIME_TYPES = Map.ofEntries(
-            Map.entry("txt", "text/plain"),
-            Map.entry("log", "text/plain"),
-            Map.entry("csv", "text/csv"),
-            Map.entry("json", "application/json"),
-            Map.entry("jsonl", "application/json"),
-            Map.entry("yaml", "text/yaml"),
-            Map.entry("yml", "text/yaml"),
-            Map.entry("md", "text/markdown"),
-            Map.entry("png", "image/png"),
-            Map.entry("jpg", "image/jpeg"),
-            Map.entry("jpeg", "image/jpeg"),
-            Map.entry("gif", "image/gif"),
-            Map.entry("pdf", "application/pdf"),
-            Map.entry("zip", "application/zip"),
-            Map.entry("xml", "application/xml"),
-            Map.entry("html", "text/html"),
-            Map.entry("htm", "text/html"),
-            Map.entry("svg", "image/svg+xml")
-    );
-
-    Path validateAndResolveFilePath(String filePath) {
-        if (filePath == null || filePath.isBlank()) {
-            throw new IllegalArgumentException("File path must not be null or empty");
-        }
-        String expanded = filePath.trim();
-        if (expanded.equals("~")) {
-            expanded = System.getProperty("user.home");
-        } else if (expanded.startsWith("~" + File.separator) || expanded.startsWith("~/")) {
-            expanded = System.getProperty("user.home") + expanded.substring(1);
-        }
-        Path path = Path.of(expanded).toAbsolutePath().normalize();
-        if (!Files.exists(path)) {
-            throw new IllegalArgumentException("File not found at path: " + filePath);
-        }
-        if (Files.isDirectory(path)) {
-            throw new IllegalArgumentException("Path is a directory, not a regular file: " + filePath);
-        }
-        if (!Files.isRegularFile(path)) {
-            throw new IllegalArgumentException("Path is not a regular file: " + filePath);
-        }
-        if (!Files.isReadable(path)) {
-            throw new IllegalArgumentException("File is not readable (check permissions): " + filePath);
-        }
-        try {
-            long size = Files.size(path);
-            if (size == 0) {
-                throw new IllegalArgumentException("Cannot upload empty file (0 bytes): " + filePath);
-            }
-            if (size > MAX_ATTACHMENT_SIZE_BYTES) {
-                throw new IllegalArgumentException("File size exceeds maximum upload limit of 50MB (" + size + " bytes): " + filePath);
-            }
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to check file size for " + filePath + ": " + e.getMessage(), e);
-        }
-        return path;
-    }
-
-    String resolveTargetFilename(Path path, @Nullable String filename) {
-        if (filename != null && !filename.isBlank()) {
-            String trimmed = filename.trim();
-            Path fnPath = Path.of(trimmed).getFileName();
-            return fnPath != null ? fnPath.toString() : trimmed;
-        }
-        Path fileNamePath = path.getFileName();
-        return fileNamePath != null ? fileNamePath.toString() : "attachment.bin";
-    }
-
-    void validateFilenameExtension(String filename) {
-        int lastDot = filename.lastIndexOf('.');
-        if (lastDot <= 0 || lastDot == filename.length() - 1) {
-            throw new IllegalArgumentException(
-                    "Filename must include a valid file extension (e.g. .png, .txt, .pdf): " + filename);
-        }
-    }
-
-    String probeContentType(Path path, String targetFilename) {
-        try {
-            String probed = Files.probeContentType(path);
-            if (probed != null && !probed.isBlank()) {
-                return probed;
-            }
-        } catch (IOException _) {
-            // Fall back to framework and extension-based lookup
-        }
-        int lastDot = targetFilename.lastIndexOf('.');
-        if (lastDot > 0 && lastDot < targetFilename.length() - 1) {
-            String ext = targetFilename.substring(lastDot + 1).toLowerCase();
-            Optional<MediaType> mediaType = MediaType.forExtension(ext);
-            if (mediaType.isPresent()) {
-                return mediaType.get().getName();
-            }
-            String mime = EXTENSION_MIME_TYPES.get(ext);
-            if (mime != null) {
-                return mime;
-            }
-        }
-        return MediaType.APPLICATION_OCTET_STREAM;
-    }
-
-    @Tool(description = "Upload a file from the local file system to Zendesk to obtain an upload token for use in createTicket, updateTicket, or batchUpdateTickets")
-    public AttachmentUploadResponse uploadAttachment(
-            @ToolArg(description = "The absolute path to the local file to upload") String filePath,
-            @ToolArg(description = "Optional filename to use for the attachment. If not provided, the local filename is used.") @Nullable String filename,
-            @Nullable CallToolRequest request
-    ) {
-        log.info("MCP Tool called: uploadAttachment(filePath='{}', filename='{}')", filePath, filename);
-        validateKnownParameters(request, "uploadAttachment", "filePath", "filename");
-        Path path = validateAndResolveFilePath(filePath);
-        String targetFilename = resolveTargetFilename(path, filename);
-        validateFilenameExtension(targetFilename);
-
-        byte[] bytes;
-        try {
-            bytes = Files.readAllBytes(path);
-        } catch (IOException e) {
-            log.error("Failed to read file from {}: {}", filePath, e.getMessage(), e);
-            throw new IllegalArgumentException("Failed to read file at " + filePath + ": " + e.getMessage(), e);
-        }
-
-        String contentType = probeContentType(path, targetFilename);
-        log.debug("Uploading attachment: filename='{}', contentType='{}', size={} bytes", targetFilename, contentType, bytes.length);
-
-        return attachmentClient.uploadAttachment(targetFilename, contentType, bytes).block();
-    }
-
-    public AttachmentUploadResponse uploadAttachment(String filePath, @Nullable String filename) {
-        return uploadAttachment(filePath, filename, null);
-    }
-
-
-    @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, attachments, custom status, ticket form, or link to a problem ticket. Supports concurrent immediate updates or Zendesk async bulk jobs.")
-    public BatchUpdateResponse batchUpdateTickets(
-            @ToolArg(description = "List of numeric ticket IDs to update") List<Long> ticketIds,
-            @ToolArg(description = "Comment text to add to the tickets") @Nullable String comment,
-            @ToolArg(description = "New status: new, open, pending, hold, solved, closed") @Nullable String status,
-            @ToolArg(description = "New priority: urgent, high, normal, low") @Nullable String priority,
-            @ToolArg(description = "Required if a comment or attachment is provided. Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
-            @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
-            @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
-            @ToolArg(description = "If true, queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus. If false (default), updates tickets concurrently via Reactor returning immediate per-ticket results.") @Nullable Boolean asyncBulk,
-            @ToolArg(description = "Optional ID of the parent problem ticket to link these incidents to") @Nullable Long problemId,
-            @ToolArg(description = "Required if setting problemId on tickets that are not currently incidents. Set to true to explicitly convert them.") @Nullable Boolean convertToIncident,
-            @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
-            @ToolArg(description = "Optional requester ID (Zendesk user ID on whose behalf the ticket is created / reassigned)") @Nullable Long requesterId,
-            @ToolArg(description = "Optional ticket type: 'problem', 'incident', 'question', 'task', or empty/none to unset") @Nullable String type,
-            @ToolArg(description = "Optional numeric ID of a custom ticket status (from listCustomStatuses)") @Nullable Long customStatusId,
-            @ToolArg(description = "Optional numeric ticket form ID to change the form used for these tickets") @Nullable Long ticketFormId,
-            CallToolRequest request
-    ) {
-        TicketMutationOptions options = TicketMutationOptions.builder()
-                .comment(comment)
-                .status(status)
-                .priority(priority)
-                .isPublic(isPublic)
-                .uploadTokens(uploadTokens)
-                .attachmentFilePaths(attachmentFilePaths)
-                .problemId(problemId)
-                .convertToIncident(convertToIncident)
-                .customFields(customFields)
-                .requesterId(requesterId)
-                .type(type)
-                .customStatusId(customStatusId)
-                .ticketFormId(ticketFormId)
-                .build();
-        return batchUpdateTickets(ticketIds, options, asyncBulk, request);
-    }
-
-    public BatchUpdateResponse batchUpdateTickets(
-            List<Long> ticketIds,
-            TicketMutationOptions options,
-            @Nullable Boolean asyncBulk,
-            @Nullable CallToolRequest request
-    ) {
-        if (options == null) {
-            options = TicketMutationOptions.builder().build();
-        }
-        log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={})", ticketIds, asyncBulk);
-        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", "comment", "status", "priority", "isPublic", "uploadTokens", "attachmentFilePaths", "asyncBulk", "problemId", "convertToIncident", "customFields", "requesterId", "type", "customStatusId", "custom_status_id", "ticketFormId", "ticket_form_id");
-        if (ticketIds == null || ticketIds.isEmpty()) {
-            return new BatchUpdateResponse(null, null, Collections.emptyList());
-        }
-
-        List<?> rawIds = ticketIds;
-        List<Long> distinctIds = new ArrayList<>();
-        for (Object obj : rawIds) {
-            if (obj instanceof Number num) {
-                distinctIds.add(num.longValue());
-            } else if (obj != null) {
-                try {
-                    distinctIds.add(Long.parseLong(obj.toString().trim()));
-                } catch (NumberFormatException _) {
-                    log.warn("Invalid ticket ID format in batch update: {}", obj);
-                }
-            }
-        }
-        distinctIds = distinctIds.stream().distinct().toList();
-
-        if (distinctIds.isEmpty()) {
-            return new BatchUpdateResponse(null, null, Collections.emptyList());
-        }
-
-        List<String> tokens = resolveUploadTokens(options.uploadTokens(), options.attachmentFilePaths());
-
-        validateProblemTypeConflict(options.problemId(), options.type());
-        validateProblemTarget(options.problemId());
-
-        final Long resolvedTicketFormId = resolveTicketFormId(options.ticketFormId(), request);
-        if (resolvedTicketFormId != null) {
-            validateTicketFormBounds(resolvedTicketFormId);
-            validateTicketForm(resolvedTicketFormId);
-        }
-
-        final Long resolvedCustomStatusId = resolveCustomStatusId(options.customStatusId(), request);
-        TicketFieldCustomStatusObject validatedCustomStatus = null;
-        if (resolvedCustomStatusId != null) {
-            validateCustomStatusBounds(resolvedCustomStatusId);
-            validatedCustomStatus = validateCustomStatus(resolvedCustomStatusId, options.status());
-            if (resolvedTicketFormId != null) {
-                validateCustomStatusForForm(validatedCustomStatus, resolvedTicketFormId);
-            }
-        }
-
-        final boolean isTypeUnset = isTypeUnset(options.type());
-        final TicketUpdateInputType parsedType = (options.type() != null && !isTypeUnset) ? parseTicketType(options.type()) : null;
-        List<TicketCustomField> parsedCustomFields = parseCustomFields(options.customFields());
-
-        final TicketMutationOptions finalOptions = options;
-        if (Boolean.TRUE.equals(asyncBulk)) {
-            boolean needsCurrentTicket = finalOptions.problemId() != null || (finalOptions.type() != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM)) || (resolvedCustomStatusId != null && StringUtils.isEmpty(finalOptions.status()));
-            if (needsCurrentTicket) {
-                List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
-                        .flatMap(id -> {
-                            Mono<TicketResponse> showMono = ticketClient.showTicket(id);
-                            if (showMono == null) {
-                                return Mono.empty();
-                            }
-                            return showMono.onErrorResume(e -> Mono.empty())
-                                     .filter(resp -> resp != null && resp.getTicket() != null)
-                                    .map(TicketResponse::getTicket);
-                        })
-                        .collectList()
-                        .block();
-                if (currentTickets != null) {
-                    for (Ticket currentTicket : currentTickets) {
-                        if (finalOptions.type() != null) {
-                            validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
-                        }
-                        if (finalOptions.problemId() != null) {
-                            TicketUpdateInput testInput = new TicketUpdateInput();
-                            applyProblemIdLogic(currentTicket, testInput, finalOptions.problemId(), finalOptions.convertToIncident());
-                        }
-                        if (resolvedCustomStatusId != null && StringUtils.isEmpty(finalOptions.status())) {
-                            validateTicketCustomStatusCategoryMatch(currentTicket.getId(), currentTicket, validatedCustomStatus, resolvedCustomStatusId);
-                        }
-                        Long formIdToValidate = resolvedTicketFormId != null ? resolvedTicketFormId : currentTicket.getTicketFormId();
-                        if (validatedCustomStatus != null && formIdToValidate != null) {
-                            validateCustomStatusForForm(validatedCustomStatus, formIdToValidate);
-                        }
-                    }
-                }
-            }
-
-            TicketUpdateInput input = buildTicketUpdateInput(finalOptions.comment(), finalOptions.status(), finalOptions.priority(), finalOptions.isPublic(), tokens, parsedCustomFields, finalOptions.requesterId(), finalOptions.type(), finalOptions.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId);
-            if (finalOptions.problemId() != null) {
-                input.setProblemId(finalOptions.problemId().intValue());
-                input.setType(TicketUpdateInputType.INCIDENT);
-            }
-
-            List<JobStatus> jobStatuses = new ArrayList<>();
-            for (int i = 0; i < distinctIds.size(); i += 100) {
-                List<Long> chunk = distinctIds.subList(i, Math.min(distinctIds.size(), i + 100));
-                String idsStr = chunk.stream().map(Object::toString).collect(Collectors.joining(","));
-                JobStatusResponse jobResponse = ticketClient.updateManyTickets(idsStr, new TicketUpdateRequest(input)).block();
-                if (jobResponse != null && jobResponse.getJobStatus() != null) {
-                    jobStatuses.add(jobResponse.getJobStatus());
-                }
-            }
-            return new BatchUpdateResponse(jobStatuses.size() == 1 ? jobStatuses.get(0) : null, jobStatuses.isEmpty() ? null : jobStatuses, null);
-        }
-
-        // Concurrent immediate updates via Reactor Flux
-        final TicketFieldCustomStatusObject finalValidatedCustomStatus = validatedCustomStatus;
-        List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
-                .flatMapSequential(id -> {
-                    TicketUpdateInput input = buildTicketUpdateInput(finalOptions.comment(), finalOptions.status(), finalOptions.priority(), finalOptions.isPublic(), tokens, parsedCustomFields, finalOptions.requesterId(), finalOptions.type(), finalOptions.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId);
-
-                    Mono<TicketUpdateInput> inputMono;
-                    boolean needsCurrentTicket = finalOptions.problemId() != null || (finalOptions.type() != null && (isTypeUnset || parsedType != TicketUpdateInputType.PROBLEM)) || (resolvedCustomStatusId != null && StringUtils.isEmpty(finalOptions.status()));
-                    if (needsCurrentTicket) {
-                        Mono<TicketResponse> showMono = ticketClient.showTicket(id);
-                        if (showMono != null) {
-                            inputMono = showMono
-                                     .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?")))
-                                    .flatMap(resp -> {
-                                        if (resp.getTicket() == null) {
-                                            return Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?"));
-                                        }
-                                        Ticket currentTicket = resp.getTicket();
-                                        if (finalOptions.type() != null) {
-                                            validateTicketTypeChange(currentTicket, parsedType, isTypeUnset);
-                                        }
-                                        if (finalOptions.problemId() != null) {
-                                            applyProblemIdLogic(currentTicket, input, finalOptions.problemId(), finalOptions.convertToIncident());
-                                        }
-                                        if (resolvedCustomStatusId != null && StringUtils.isEmpty(finalOptions.status())) {
-                                            validateTicketCustomStatusCategoryMatch(id, currentTicket, finalValidatedCustomStatus, resolvedCustomStatusId);
-                                        }
-                                        Long formIdToValidate = resolvedTicketFormId != null ? resolvedTicketFormId : currentTicket.getTicketFormId();
-                                        if (finalValidatedCustomStatus != null && formIdToValidate != null) {
-                                            validateCustomStatusForForm(finalValidatedCustomStatus, formIdToValidate);
-                                        }
-                                        return Mono.just(input);
-                                    });
-                        } else {
-                            inputMono = Mono.just(input);
-                        }
-                    } else {
-                        inputMono = Mono.just(input);
-                    }
-
-                    return inputMono.flatMap(resolvedInput ->
-                                ticketClient.updateTicket(id, new TicketUpdateRequest(resolvedInput))
-                            )
-                            .map(resp -> new TicketUpdateResult(id, true, resp != null ? resp.getTicket() : null, null))
-                            .onErrorResume(e -> {
-                                log.warn("Failed to update ticket {}: {}", id, e.getMessage());
-                                return Mono.just(new TicketUpdateResult(id, false, null, e.getMessage()));
-                            });
-                }, 10)
-                .collectList()
-                .block();
-
-        return new BatchUpdateResponse(null, null, results != null ? results : Collections.emptyList());
-    }
-
-    public BatchUpdateResponse batchUpdateTickets(
-            List<Long> ticketIds,
-            TicketMutationOptions options
-    ) {
-        return batchUpdateTickets(ticketIds, options, null, null);
-    }
-
-    public BatchUpdateResponse batchUpdateTickets(
-            List<Long> ticketIds,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Boolean asyncBulk,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields,
-            Long requesterId,
-            String type,
-            Long customStatusId,
-            CallToolRequest request
-    ) {
-        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, customStatusId, null, request);
-    }
-
-
-    public BatchUpdateResponse batchUpdateTickets(
-            List<Long> ticketIds,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Boolean asyncBulk,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields,
-            Long requesterId,
-            String type,
-            CallToolRequest request
-    ) {
-        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, null, null, request);
-    }
-
-    public BatchUpdateResponse batchUpdateTickets(
-            List<Long> ticketIds,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Boolean asyncBulk,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields,
-            CallToolRequest request
-    ) {
-        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, null, null, request);
-    }
-
-    public BatchUpdateResponse batchUpdateTickets(
-            List<Long> ticketIds,
-            String comment,
-            String status,
-            String priority,
-            Boolean isPublic,
-            List<String> uploadTokens,
-            List<String> attachmentFilePaths,
-            Boolean asyncBulk,
-            Long problemId,
-            Boolean convertToIncident,
-            List<Map<String, Object>> customFields
-    ) {
-        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, null, null, null);
-    }
-    @Tool(description = "Get status and progress of an asynchronous Zendesk background job by its job ID")
-    public JobStatusResponse getJobStatus(
-            @ToolArg(description = "The job status ID") String jobId
-    ) {
-        log.info("MCP Tool called: getJobStatus(id='{}')", jobId);
-        return jobStatusClient.showJobStatus(jobId).block();
-    }
-
-    @Tool(description = "List all active ticket fields configured in Zendesk")
-    public TicketFieldsResponse listTicketFields() {
-        log.info("MCP Tool called: listTicketFields()");
-        return ticketClient.listTicketFields(null, true).block();
-    }
-
-    @Tool(description = "Get details of a specific Zendesk ticket field by its numeric ID")
-    public TicketFieldResponse getTicketField(
-            @ToolArg(description = "The numeric ticket field ID") Long ticketFieldId
-    ) {
-        log.info("MCP Tool called: getTicketField(id={})", ticketFieldId);
-        return ticketClient.showTicketField(ticketFieldId).block();
-    }
-
-    @Tool(description = "List Zendesk custom ticket statuses and status categories with context on which forms they can be used with. Supports filtering by statusCategory and ticketFormId. By default returns a compact summary of active statuses to save tokens.")
-    public Map<String, Object> listCustomStatuses(
-            @ToolArg(description = "Optional filter by status category: new, open, pending, hold, solved") @Nullable String statusCategory,
-            @ToolArg(description = "Optional filter by numeric ticket form ID to return only custom statuses available for that specific form") @Nullable Long ticketFormId,
-            @ToolArg(description = "Whether to include inactive custom statuses. Defaults to false (active statuses only)") @Nullable Boolean includeInactive,
-            @ToolArg(description = "Whether to return full status objects or just compact summary. Defaults to false (summary mode)") @Nullable Boolean fullPayload,
-            @Nullable CallToolRequest request
-    ) {
-        log.info("MCP Tool called: listCustomStatuses(statusCategory='{}', ticketFormId={}, includeInactive={}, fullPayload={})", statusCategory, ticketFormId, includeInactive, fullPayload);
-        validateKnownParameters(request, "listCustomStatuses", "statusCategory", "ticketFormId", "ticket_form_id", "includeInactive", "fullPayload");
-
-        Long resolvedTicketFormId = ticketFormId;
-        if (resolvedTicketFormId == null && request != null && request.arguments() != null) {
-            if (request.arguments().containsKey("ticket_form_id")) {
-                Object val = request.arguments().get("ticket_form_id");
-                if (val instanceof Number n) {
-                    resolvedTicketFormId = n.longValue();
-                } else if (val != null) {
-                    try {
-                        resolvedTicketFormId = Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {}
-                }
-            } else if (request.arguments().containsKey("ticketFormId")) {
-                Object val = request.arguments().get("ticketFormId");
-                if (val instanceof Number n) {
-                    resolvedTicketFormId = n.longValue();
-                } else if (val != null) {
-                    try {
-                        resolvedTicketFormId = Long.parseLong(val.toString().trim());
-                    } catch (NumberFormatException _) {}
-                }
-            }
-        }
-
-        String normalizedCategory = null;
-        if (StringUtils.isNotEmpty(statusCategory)) {
-            normalizedCategory = statusCategory.trim().toLowerCase();
-            Set<String> validCategories = Set.of("new", "open", "pending", "hold", "solved");
-            if (!validCategories.contains(normalizedCategory)) {
-                throw new IllegalArgumentException("Invalid status category: '" + statusCategory + "'. Allowed categories are: new, open, pending, hold, solved.");
-            }
-        }
-
-        if (customStatusClient == null) {
-            Map<String, Object> empty = new LinkedHashMap<>();
-            empty.put("custom_statuses", Collections.emptyList());
-            empty.put("status_categories", Collections.emptyMap());
-            return empty;
-        }
-
-        List<TicketFieldCustomStatusObject> allStatuses = getCachedCustomStatuses(false);
-        List<TicketFieldCustomStatusObject> statuses = new ArrayList<>(allStatuses);
-
-        if (!Boolean.TRUE.equals(includeInactive)) {
-            statuses = statuses.stream()
-                    .filter(s -> Boolean.TRUE.equals(s.getActive()))
-                    .collect(Collectors.toList());
-        }
-
-        if (normalizedCategory != null) {
-            final String cat = normalizedCategory;
-            statuses = statuses.stream()
-                    .filter(s -> s.getStatusCategory() != null && cat.equalsIgnoreCase(s.getStatusCategory().getValue()))
-                    .collect(Collectors.toList());
-        }
-
-        List<TicketFormStatus> allFormStatuses = getCachedTicketFormStatuses(false);
-        Map<Long, List<Long>> statusToForms = new LinkedHashMap<>();
-        if (allFormStatuses != null) {
-            for (TicketFormStatus fs : allFormStatuses) {
-                if (fs != null && fs.customStatusId() != null && fs.ticketFormId() != null) {
-                    statusToForms.computeIfAbsent(fs.customStatusId(), k -> new ArrayList<>()).add(fs.ticketFormId());
-                }
-            }
-        }
-
-        if (resolvedTicketFormId != null) {
-            final Long formId = resolvedTicketFormId;
-            statuses = statuses.stream().filter(s -> {
-                if (s == null) return false;
-                if (Boolean.TRUE.equals(s.getIsDefault())) return true;
-                if (statusToForms.isEmpty()) return true;
-                List<Long> forms = statusToForms.get(s.getId());
-                return forms != null ? forms.contains(formId) : true;
-            }).collect(Collectors.toList());
-        }
-
-        Map<String, List<Map<String, Object>>> categoryMap = new LinkedHashMap<>();
-        List<String> stdCategories = List.of("new", "open", "pending", "hold", "solved");
-        for (String cat : stdCategories) {
-            if (normalizedCategory != null && !normalizedCategory.equalsIgnoreCase(cat)) {
-                continue;
-            }
-            categoryMap.put(cat, new ArrayList<>());
-        }
-        for (TicketFieldCustomStatusObject s : statuses) {
-            String cat = s.getStatusCategory() != null ? s.getStatusCategory().getValue().toLowerCase() : "unknown";
-            List<Map<String, Object>> catList = categoryMap.computeIfAbsent(cat, k -> new ArrayList<>());
-            Map<String, Object> catItem = new LinkedHashMap<>();
-            catItem.put("id", s.getId());
-            catItem.put("agent_label", s.getAgentLabel());
-            catItem.put("default", s.getIsDefault());
-            if (statusToForms.containsKey(s.getId())) {
-                catItem.put("ticket_form_ids", statusToForms.get(s.getId()));
-            } else {
-                catItem.put("applies_to_all_forms", true);
-            }
-            catList.add(catItem);
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        if (resolvedTicketFormId != null) {
-            result.put("ticket_form_id", resolvedTicketFormId);
-        }
-
-        if (Boolean.TRUE.equals(fullPayload)) {
-            result.put("custom_statuses", statuses);
-            result.put("status_categories", categoryMap);
-            if (allFormStatuses != null && !allFormStatuses.isEmpty()) {
-                result.put("ticket_form_statuses", allFormStatuses);
-            }
-            return result;
-        }
-
-        List<Map<String, Object>> summaries = statuses.stream().map(s -> {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("id", s.getId());
-            item.put("agent_label", s.getAgentLabel());
-            item.put("status_category", s.getStatusCategory() != null ? s.getStatusCategory().getValue() : null);
-            item.put("active", s.getActive());
-            item.put("default", s.getIsDefault());
-            if (statusToForms.containsKey(s.getId())) {
-                item.put("ticket_form_ids", statusToForms.get(s.getId()));
-            } else {
-                item.put("applies_to_all_forms", true);
-            }
-            if (StringUtils.isNotEmpty(s.getDescription())) {
-                item.put("description", s.getDescription());
-            }
-            return item;
-        }).collect(Collectors.toList());
-
-        result.put("custom_statuses", summaries);
-        result.put("status_categories", categoryMap);
-        return result;
-    }
-
-    public Map<String, Object> listCustomStatuses(
-            @Nullable String statusCategory,
-            @Nullable Boolean includeInactive,
-            @Nullable Boolean fullPayload,
-            @Nullable CallToolRequest request
-    ) {
-        return listCustomStatuses(statusCategory, null, includeInactive, fullPayload, request);
-    }
-
-    public Map<String, Object> listCustomStatuses(
-            @Nullable String statusCategory,
-            @Nullable Long ticketFormId,
-            @Nullable Boolean includeInactive,
-            @Nullable Boolean fullPayload
-    ) {
-        return listCustomStatuses(statusCategory, ticketFormId, includeInactive, fullPayload, null);
-    }
-
-    public Map<String, Object> listCustomStatuses(
-            @Nullable String statusCategory,
-            @Nullable Boolean includeInactive,
-            @Nullable Boolean fullPayload
-    ) {
-        return listCustomStatuses(statusCategory, null, includeInactive, fullPayload, null);
-    }
-
-    public Map<String, Object> listCustomStatuses() {
-        return listCustomStatuses(null, null, null, null, null);
-    }
-
-    public Map<String, Object> listStatusCategories() {
-        return listCustomStatuses();
-    }
-
-    public Map<String, Object> listStatusCategories(@Nullable Long ticketFormId) {
-        return listCustomStatuses(null, ticketFormId, false, false, null);
-    }
-
-    public Map<String, Object> listTicketForms() {
-        return listTicketForms(null, null);
-    }
-
-    @Tool(description = "List Zendesk ticket forms. By default returns a compact summary of active forms only to save tokens. Use getTicketForm for full form details.")
-    public Map<String, Object> listTicketForms(
-            @ToolArg(description = "Whether to include inactive forms. Defaults to false (active forms only)") @Nullable Boolean includeInactive,
-            @ToolArg(description = "Whether to return full form schemas (including conditions and field IDs) or just summary. Defaults to false (summary mode)") @Nullable Boolean fullPayload
-    ) {
-        log.info("MCP Tool called: listTicketForms(includeInactive={}, fullPayload={})", includeInactive, fullPayload);
-        List<TicketForm> allForms = getCachedTicketForms(false);
-        if (allForms == null || allForms.isEmpty()) {
-            Map<String, Object> empty = new LinkedHashMap<>();
-            empty.put(TICKET_FORMS_KEY, Collections.emptyList());
-            return empty;
-        }
-
-        boolean activeOnly = !Boolean.TRUE.equals(includeInactive);
-        boolean isFull = Boolean.TRUE.equals(fullPayload);
-
-        List<TicketForm> forms = new ArrayList<>(allForms);
-        if (activeOnly) {
-            forms = forms.stream()
-                    .filter(f -> Boolean.TRUE.equals(f.getActive()))
-                    .collect(Collectors.toList());
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        if (isFull) {
-            result.put(TICKET_FORMS_KEY, forms);
-            return result;
-        }
-
-        List<Map<String, Object>> summaries = forms.stream().map(f -> {
-            Map<String, Object> s = new LinkedHashMap<>();
-            s.put("id", f.getId());
-            s.put("name", f.getName());
-            s.put("display_name", f.getDisplayName());
-            s.put("active", f.getActive());
-            s.put("default", f.getDefaultForm());
-            return s;
-        }).collect(Collectors.toList());
-
-        result.put(TICKET_FORMS_KEY, summaries);
-        return result;
-    }
-
-    @Tool(description = "Get details of a specific Zendesk ticket form by its numeric ID")
-    public TicketFormResponse getTicketForm(
-            @ToolArg(description = "The numeric ticket form ID") Long ticketFormId
-    ) {
-        log.info("MCP Tool called: getTicketForm(id={})", ticketFormId);
-        if (ticketFormId == null) {
-            throw new IllegalArgumentException("ticketFormId is required");
-        }
-        validateTicketFormBounds(ticketFormId);
-        return ticketFormsClient.showTicketForm(ticketFormId).block();
-    }
-
-    @Tool(description = "List all custom objects defined in Zendesk")
-    public CustomObjectsResponse listCustomObjects() {
-        log.info("MCP Tool called: listCustomObjects()");
-        return customObjectsClient.listCustomObjects().block();
-    }
-
-    @Tool(description = "Get details and schema of a specific custom object by its key")
-    public CustomObjectResponse getCustomObject(
-            @ToolArg(description = "The key of the custom object") String customObjectKey
-    ) {
-        log.info("MCP Tool called: getCustomObject(key='{}')", customObjectKey);
-        return customObjectsClient.showCustomObject(customObjectKey).block();
-    }
-
-    @Tool(description = "List records for a specific Zendesk custom object")
-    public CustomObjectRecordsResponse listCustomObjectRecords(
-            @ToolArg(description = "The key of the custom object") String customObjectKey
-    ) {
-        log.info("MCP Tool called: listCustomObjectRecords(key='{}')", customObjectKey);
-        return customObjectRecordsClient.listCustomObjectRecords(customObjectKey).block();
-    }
-
-    @Tool(description = "Get details of a specific custom object record by its ID")
-    public CustomObjectRecordResponse getCustomObjectRecord(
-            @ToolArg(description = "The key of the custom object") String customObjectKey,
-            @ToolArg(description = "The ID of the custom object record") String recordId
-    ) {
-        log.info("MCP Tool called: getCustomObjectRecord(key='{}', recordId='{}')", customObjectKey, recordId);
-        return customObjectRecordsClient.showCustomObjectRecord(customObjectKey, recordId).block();
-    }
-
-    @Tool(description = "Search records for a specific Zendesk custom object matching query text")
-    public CustomObjectRecordsResponse searchCustomObjectRecords(
-            @ToolArg(description = "The key of the custom object") String customObjectKey,
-            @ToolArg(description = "Search query string") String query
-    ) {
-        log.info("MCP Tool called: searchCustomObjectRecords(key='{}', query='{}')", customObjectKey, query);
-        return customObjectRecordsClient.searchCustomObjectRecords(customObjectKey, query).block();
-    }
-
-    @Tool(description = "Get full audit event history for a ticket, including field changes, comments, notifications, and trigger/business rule executions (via via.channel='rule', via.source.rel='trigger', via.source.from.title)")
-    public TicketAuditsResponse getTicketAudits(
-            @ToolArg(description = "The numeric ticket ID") Long ticketId
-    ) {
-        log.info("MCP Tool called: getTicketAudits(id={})", ticketId);
-        return ticketClient.listAuditsForTicket(ticketId).block();
-    }
-
-    @Tool(description = "List all views configured in Zendesk")
-    public ViewsResponse listViews() {
-        log.info("MCP Tool called: listViews()");
-        return viewClient.listViews().block();
-    }
-
-    private static final Set<String> ALLOWED_RESOURCE_TYPES = Set.of("articles", "sections", "categories");
-
-    @Tool(description = "Get tickets from a specific Zendesk view by its numeric ID")
-    public TicketsResponse getViewTickets(
-            @ToolArg(description = "The numeric view ID") Long viewId
-    ) {
-        log.info("MCP Tool called: getViewTickets(viewId={})", viewId);
-        if (viewId == null) {
-            throw new IllegalArgumentException("viewId is required");
-        }
-        return viewClient.listTicketsForView(viewId).block();
-    }
-
-    @Tool(description = "List only active views configured in Zendesk")
-    public ViewsResponse listActiveViews() {
-        log.info("MCP Tool called: listActiveViews()");
-        return viewClient.listActiveViews().block();
-    }
-
-    @Tool(description = "Get details of a specific Zendesk view by its numeric ID")
-    public ViewResponse getView(
-            @ToolArg(description = "The numeric view ID") Long viewId
-    ) {
-        log.info("MCP Tool called: getView(viewId={})", viewId);
-        if (viewId == null) {
-            throw new IllegalArgumentException("viewId is required");
-        }
-        return viewClient.showView(viewId).block();
-    }
-
-    @Tool(description = "Execute a specific Zendesk view by its numeric ID to retrieve ticket rows and columns")
-    public ViewExecuteResponse executeView(
-            @ToolArg(description = "The numeric view ID") Long viewId
-    ) {
-        log.info("MCP Tool called: executeView(viewId={})", viewId);
-        if (viewId == null) {
-            throw new IllegalArgumentException("viewId is required");
-        }
-        return viewClient.executeView(viewId).block();
-    }
-
-    @Tool(description = "Get the ticket count for a specific Zendesk view by its numeric ID")
-    public ViewCountResponse getViewTicketCount(
-            @ToolArg(description = "The numeric view ID") Long viewId
-    ) {
-        log.info("MCP Tool called: getViewTicketCount(viewId={})", viewId);
-        if (viewId == null) {
-            throw new IllegalArgumentException("viewId is required");
-        }
-        return viewClient.countView(viewId).block();
-    }
-
-    @Tool(description = "Get details and content of a specific Zendesk Help Center / Knowledge Base article by its numeric ID")
-    public ArticleResponse getArticle(
-            @ToolArg(description = "The numeric article ID") Long articleId,
-            @ToolArg(description = "Optional locale code, e.g. 'en-us'. Defaults to 'en-us'") @Nullable String locale
-    ) {
-        log.info("MCP Tool called: getArticle(id={}, locale='{}')", articleId, locale);
-        if (articleId == null) {
-            throw new IllegalArgumentException("articleId is required");
-        }
-        LocaleAbbreviation localeAbbr = resolveLocale(locale);
-        return articleClient.showArticle(localeAbbr, articleId).block();
-    }
-
-    @Tool(description = "List Zendesk Help Center / Knowledge Base articles")
-    public ArticlesResponse listArticles(
-            @ToolArg(description = "Optional locale code, e.g. 'en-us'. Defaults to 'en-us'") @Nullable String locale,
-            @ToolArg(description = "Optional sort field: position, title, created_at, updated_at, edited_at") @Nullable String sortBy,
-            @ToolArg(description = "Optional sort order: asc or desc") @Nullable String sortOrder,
-            @ToolArg(description = "Optional start time Unix epoch timestamp for incremental listing") @Nullable Long startTime,
-            @ToolArg(description = "Optional comma-delimited label names") @Nullable String labelNames
-    ) {
-        log.info("MCP Tool called: listArticles(locale='{}', sortBy='{}')", locale, sortBy);
-        LocaleAbbreviation localeAbbr = resolveLocale(locale);
-        return articleClient.listArticles(
-                localeAbbr,
-                resolveSortArticleBy(sortBy),
-                resolveSortOrder(sortOrder),
-                startTime,
-                labelNames
-        ).block();
-    }
-
-    @Tool(description = "Create a new article in a Zendesk Help Center section")
-    public ArticleResponse createArticle(
-            @ToolArg(description = "The ID of the section to which the article belongs") Long sectionId,
-            @ToolArg(description = "The title of the article") String title,
-            @ToolArg(description = "The HTML body content of the article") String body,
-            @ToolArg(description = "The ID of the permission group defining who can edit/publish this article") Long permissionGroupId,
-            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale,
-            @ToolArg(description = "Optional flag indicating whether this article is a draft. Defaults to true for safety") @Nullable Boolean draft,
-            @ToolArg(description = "Optional list of label names for the article") @Nullable List<String> labelNames,
-            @ToolArg(description = "Optional user segment ID defining who can view this article") @Nullable Long userSegmentId
-    ) {
-        log.info("MCP Tool called: createArticle(sectionId={}, title='{}')", sectionId, title);
-        if (sectionId == null) {
-            throw new IllegalArgumentException("sectionId is required");
-        }
-        if (title == null || title.isBlank()) {
-            throw new IllegalArgumentException("title is required");
-        }
-        if (body == null || body.isBlank()) {
-            throw new IllegalArgumentException("body is required");
-        }
-        if (permissionGroupId == null) {
-            throw new IllegalArgumentException("permissionGroupId is required");
-        }
-        LocaleAbbreviation localeAbbr = resolveLocale(locale);
-        boolean isDraft = draft == null || draft;
-        Article article = new Article()
-                .setTitle(title)
-                .setBody(body)
-                .setPermissionGroupId(permissionGroupId)
-                .setLocaleAbbreviation(localeAbbr)
-                .setDraft(isDraft);
-        if (labelNames != null && !labelNames.isEmpty()) {
-            article.setLabelNames(labelNames);
-        }
-        if (userSegmentId != null) {
-            article.setUserSegmentId(userSegmentId);
-        }
-        return articleClient.createArticle(localeAbbr, sectionId, new ArticleCreateRequest(article)).block();
-    }
-
-    @Tool(description = "Update an existing Zendesk Help Center article")
-    public ArticleResponse updateArticle(
-            @ToolArg(description = "The unique numeric ID of the article") Long articleId,
-            @ToolArg(description = "Optional new title of the article") @Nullable String title,
-            @ToolArg(description = "Optional new HTML body content of the article") @Nullable String body,
-            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale,
-            @ToolArg(description = "Optional flag to publish (false) or draft (true) the article") @Nullable Boolean draft,
-            @ToolArg(description = "Optional permission group ID defining who can edit/publish this article") @Nullable Long permissionGroupId,
-            @ToolArg(description = "Optional list of label names for the article") @Nullable List<String> labelNames,
-            @ToolArg(description = "Optional user segment ID defining who can view this article") @Nullable Long userSegmentId
-    ) {
-        log.info("MCP Tool called: updateArticle(articleId={})", articleId);
-        if (articleId == null) {
-            throw new IllegalArgumentException("articleId is required");
-        }
-        if (title == null && body == null && labelNames == null && userSegmentId == null && draft == null && permissionGroupId == null) {
-            throw new IllegalArgumentException("At least one field to update (title, body, labelNames, userSegmentId, draft, permissionGroupId) must be provided.");
-        }
-        LocaleAbbreviation localeAbbr = resolveLocale(locale);
-        Article article = new Article();
-        if (title != null) {
-            article.setTitle(title);
-        }
-        if (body != null) {
-            article.setBody(body);
-        }
-        if (draft != null) {
-            article.setDraft(draft);
-        }
-        if (permissionGroupId != null) {
-            article.setPermissionGroupId(permissionGroupId);
-        }
-        if (labelNames != null) {
-            article.setLabelNames(labelNames);
-        }
-        if (userSegmentId != null) {
-            article.setUserSegmentId(userSegmentId);
-        }
-        return articleClient.updateArticle(localeAbbr, articleId, new ArticleUpdateRequest(article)).block();
-    }
-
-    @Tool(description = "Delete a Zendesk Help Center article translation for a given locale (or the article if it is the only translation). Requires confirm=true to prevent accidental deletion")
-    public Map<String, Object> deleteArticle(
-            @ToolArg(description = "The unique numeric ID of the article to delete") Long articleId,
-            @ToolArg(description = "Must be explicitly set to true to confirm deletion of this article") @Nullable Boolean confirm,
-            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
-    ) {
-        log.info("MCP Tool called: deleteArticle(articleId={}, confirm={})", articleId, confirm);
-        if (articleId == null) {
-            throw new IllegalArgumentException("articleId is required");
-        }
-        if (!Boolean.TRUE.equals(confirm)) {
-            throw new IllegalArgumentException("Deletion requires explicit confirmation. Set 'confirm' to true to proceed.");
-        }
-        LocaleAbbreviation localeAbbr = resolveLocale(locale);
-        articleClient.deleteArticle(localeAbbr, articleId).block();
-        return Map.of("success", true, "deletedArticleId", articleId);
-    }
-
-    @Tool(description = "List translations for a Zendesk Help Center resource (e.g. 'articles', 'sections', 'categories')")
-    public TranslationsResponse listTranslations(
-            @ToolArg(description = "The resource type: 'articles', 'sections', or 'categories'") String resourceType,
-            @ToolArg(description = "The numeric ID of the parent resource") Long resourceId
-    ) {
-        log.info("MCP Tool called: listTranslations(resourceType='{}', resourceId={})", resourceType, resourceId);
-        String validResourceType = validateResourceType(resourceType);
-        if (resourceId == null) {
-            throw new IllegalArgumentException("resourceId is required");
-        }
-        return translationClient.listTranslations(validResourceType, resourceId).block();
-    }
-
-    @Tool(description = "Get a specific translation for a Zendesk Help Center resource by locale")
-    public TranslationResponse getTranslation(
-            @ToolArg(description = "The resource type: 'articles', 'sections', or 'categories'") String resourceType,
-            @ToolArg(description = "The numeric ID of the parent resource") Long resourceId,
-            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
-    ) {
-        log.info("MCP Tool called: getTranslation(resourceType='{}', resourceId={}, locale='{}')", resourceType, resourceId, locale);
-        String validResourceType = validateResourceType(resourceType);
-        if (resourceId == null) {
-            throw new IllegalArgumentException("resourceId is required");
-        }
-        return translationClient.showTranslation(validResourceType, resourceId, resolveLocale(locale)).block();
-    }
-
-    @Tool(description = "List Zendesk Help Center categories")
-    public CategoriesResponse listCategories(
-            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). If omitted, lists categories across all locales") @Nullable String locale
-    ) {
-        log.info("MCP Tool called: listCategories(locale='{}')", locale);
-        if (locale != null && !locale.isBlank()) {
-            return categoryClient.listCategories(resolveLocale(locale), null, null).block();
-        }
-        return categoryClient.listCategoriesNoLocale(null, null).block();
-    }
-
-    @Tool(description = "Get details of a specific Zendesk Help Center category by its numeric ID")
-    public CategoryResponse getCategory(
-            @ToolArg(description = "The numeric category ID") Long categoryId,
-            @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us')") @Nullable String locale
-    ) {
-        log.info("MCP Tool called: getCategory(categoryId={}, locale='{}')", categoryId, locale);
-        if (categoryId == null) {
-            throw new IllegalArgumentException("categoryId is required");
-        }
-        if (locale != null && !locale.isBlank()) {
-            return categoryClient.showCategory(resolveLocale(locale), categoryId).block();
-        }
-        return categoryClient.showCategoryNoLocale(categoryId).block();
-    }
-
-    @Tool(description = "List all Zendesk Community topics")
-    public TopicsResponse listCommunityTopics() {
-        log.info("MCP Tool called: listCommunityTopics()");
-        return topicClient.listTopics().block();
-    }
-
-    @Tool(description = "Get details of a specific Zendesk Community topic by its numeric ID")
-    public TopicResponse getCommunityTopic(
-            @ToolArg(description = "The numeric topic ID") Long topicId
-    ) {
-        log.info("MCP Tool called: getCommunityTopic(topicId={})", topicId);
-        if (topicId == null) {
-            throw new IllegalArgumentException("topicId is required");
-        }
-        return topicClient.showTopic(topicId).block();
-    }
-
-    @Tool(description = "List Zendesk Community posts, optionally filtered by topic ID")
-    public PostsResponse listCommunityPosts(
-            @ToolArg(description = "Optional topic ID to filter posts by") @Nullable Long topicId
-    ) {
-        log.info("MCP Tool called: listCommunityPosts(topicId={})", topicId);
-        if (topicId != null) {
-            return postClient.listPostsByTopic(topicId).block();
-        }
-        return postClient.listPosts().block();
-    }
-
-    @Tool(description = "Get details of a specific Zendesk Community post by its numeric ID")
-    public PostResponse getCommunityPost(
-            @ToolArg(description = "The numeric post ID") Long postId
-    ) {
-        log.info("MCP Tool called: getCommunityPost(postId={})", postId);
-        if (postId == null) {
-            throw new IllegalArgumentException("postId is required");
-        }
-        return postClient.showPost(postId).block();
-    }
-
-    @Tool(description = "Search Zendesk Community posts matching a query string")
-    public CommunityPostSearchResponse searchCommunityPosts(
-            @ToolArg(description = "The search query string") String query
-    ) {
-        log.info("MCP Tool called: searchCommunityPosts(query='{}')", query);
-        if (query == null || query.isBlank()) {
-            throw new IllegalArgumentException("query cannot be null or blank");
-        }
-        return postClient.searchPosts(query).block();
-    }
-
-    @Tool(description = "List comments for a specific Zendesk Community post by its numeric ID")
-    public PostCommentsResponse listCommunityPostComments(
-            @ToolArg(description = "The numeric post ID") Long postId
-    ) {
-        log.info("MCP Tool called: listCommunityPostComments(postId={})", postId);
-        if (postId == null) {
-            throw new IllegalArgumentException("postId is required");
-        }
-        return postClient.listPostComments(postId).block();
-    }
-
-    private String validateResourceType(String resourceType) {
-        if (resourceType == null || resourceType.isBlank()) {
-            throw new IllegalArgumentException("resourceType is required. Allowed values are: " + ALLOWED_RESOURCE_TYPES);
-        }
-        String normalized = resourceType.trim().toLowerCase();
-        if ("article".equals(normalized)) {
-            normalized = "articles";
-        } else if ("section".equals(normalized)) {
-            normalized = "sections";
-        } else if ("category".equals(normalized)) {
-            normalized = "categories";
-        }
-        if (!ALLOWED_RESOURCE_TYPES.contains(normalized)) {
-            throw new IllegalArgumentException("Invalid resourceType: '" + resourceType + "'. Allowed values are: " + ALLOWED_RESOURCE_TYPES);
-        }
-        return normalized;
-    }
-
-    private LocaleAbbreviation resolveLocale(@Nullable String locale) {
-        if (locale == null || locale.isBlank()) {
-            return LocaleAbbreviation.ENGLISH_UNITED_STATES;
-        }
-        String cleanLocale = locale.trim().toLowerCase();
-        if ("no".equals(cleanLocale)) {
-            return LocaleAbbreviation.NORWEGIAN;
-        }
-        try {
-            return LocaleAbbreviation.fromValue(cleanLocale);
-        } catch (IllegalArgumentException _) {
-            throw new IllegalArgumentException("Invalid locale: '" + locale + "'. Expected a standard locale code such as 'en-us', 'es', 'fr', 'de', 'ja', etc.");
-        }
-    }
-
-    private SortArticleBy resolveSortArticleBy(@Nullable String sortBy) {
-        if (sortBy == null || sortBy.isBlank()) {
-            return null;
-        }
-        String cleanSort = sortBy.trim().toLowerCase();
-        try {
-            return SortArticleBy.fromValue(cleanSort);
-        } catch (IllegalArgumentException _) {
-            throw new IllegalArgumentException("Invalid sortBy: '" + sortBy + "'. Allowed values are: position, title, created_at, updated_at, edited_at");
-        }
-    }
-
-    private SortOrder resolveSortOrder(@Nullable String sortOrder) {
-        if (sortOrder == null || sortOrder.isBlank()) {
-            return null;
-        }
-        String cleanOrder = sortOrder.trim().toLowerCase();
-        if ("ascending".equals(cleanOrder)) {
-            cleanOrder = "asc";
-        } else if ("descending".equals(cleanOrder)) {
-            cleanOrder = "desc";
-        }
-        try {
-            return SortOrder.fromValue(cleanOrder);
-        } catch (IllegalArgumentException _) {
-            throw new IllegalArgumentException("Invalid sortOrder: '" + sortOrder + "'. Allowed values are: 'asc' or 'desc'");
-        }
-    }
-
 }
