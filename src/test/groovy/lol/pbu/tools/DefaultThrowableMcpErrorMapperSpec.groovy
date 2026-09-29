@@ -72,4 +72,82 @@ class DefaultThrowableMcpErrorMapperSpec extends Specification {
         error.jsonRpcError.code == -32602
         error.message == "File not found at path: /invalid/path.txt"
     }
+
+    def "maps Throwable with empty message and cause chain by reporting class and causes"() {
+        given:
+        def root = new IOException("Connection refused")
+        def intermediate = new IllegalStateException("", root)
+        def ex = new RuntimeException("", intermediate)
+
+        when:
+        def error = mapper.map(ex)
+
+        then:
+        error.jsonRpcError.code == -32603
+        error.message == "RuntimeException; Caused by: IllegalStateException; Caused by: IOException: Connection refused"
+    }
+
+    def "maps Throwable with primary message and cause chain"() {
+        given:
+        def cause = new IllegalArgumentException("Invalid token syntax")
+        def ex = new RuntimeException("Authentication filter failure", cause)
+
+        when:
+        def error = mapper.map(ex)
+
+        then:
+        error.jsonRpcError.code == -32603
+        error.message == "Authentication filter failure; Caused by: IllegalArgumentException: Invalid token syntax"
+    }
+
+    def "buildErrorMessage handles null input"() {
+        expect:
+        DefaultThrowableMcpErrorMapper.buildErrorMessage(null) == "Unknown error"
+    }
+
+    def "formatCauseChain handles null input"() {
+        expect:
+        DefaultThrowableMcpErrorMapper.formatCauseChain(null) == ""
+    }
+
+    def "buildErrorMessage handles cyclic cause chains without infinite loop"() {
+        given:
+        def cycleEx = new Exception("Self cyclic") {
+            @Override
+            Throwable getCause() {
+                return this
+            }
+        }
+
+        when:
+        def msg = DefaultThrowableMcpErrorMapper.buildErrorMessage(cycleEx)
+
+        then:
+        msg.contains("Self cyclic")
+    }
+
+    def "buildErrorMessage handles mutually cyclic cause chains without infinite loop"() {
+        given:
+        def child = new Exception("Child error")
+        def parent = new Exception("Parent error") {
+            @Override
+            Throwable getCause() {
+                return child
+            }
+        }
+        def dynamicChild = new Exception("Child error") {
+            @Override
+            Throwable getCause() {
+                return parent
+            }
+        }
+
+        when:
+        def msg = DefaultThrowableMcpErrorMapper.buildErrorMessage(dynamicChild)
+
+        then:
+        msg.contains("Child error")
+        msg.contains("Parent error")
+    }
 }
+

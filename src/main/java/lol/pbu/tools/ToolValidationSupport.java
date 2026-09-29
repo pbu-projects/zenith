@@ -25,6 +25,8 @@ public final class ToolValidationSupport {
                 String hint;
                 if ("uploadAttachment".equals(toolName)) {
                     hint = "Valid parameters for uploadAttachment are 'filePath' and 'filename'.";
+                } else if ("getTicketAudits".equals(toolName)) {
+                    hint = "The only valid parameter for getTicketAudits is 'ticketId'.";
                 } else if ("createTicket".equals(toolName)) {
                     hint = "If you meant to set a custom field, use the 'customFields' array parameter.";
                 } else {

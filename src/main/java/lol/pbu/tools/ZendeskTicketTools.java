@@ -279,7 +279,7 @@ public class ZendeskTicketTools {
             if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
                 throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
             }
-            input.setRequesterId(requesterId.intValue());
+            input.setRequesterId(requesterId);
         }
         if (type != null && !type.isBlank()) {
             if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
@@ -301,7 +301,7 @@ public class ZendeskTicketTools {
         if (resolvedTicketFormId != null && validated != null) {
             validateCustomStatusForForm(validated, resolvedTicketFormId);
         }
-        input.setCustomStatusId(resolvedCustomStatusId.intValue());
+        input.setCustomStatusId(resolvedCustomStatusId);
     }
 
     public TicketResponse createTicket(
@@ -479,7 +479,7 @@ public class ZendeskTicketTools {
             if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
                 throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
             }
-            input.setRequesterId(requesterId.intValue());
+            input.setRequesterId(requesterId);
         }
 
         if (type != null) {
@@ -493,7 +493,7 @@ public class ZendeskTicketTools {
         }
 
         if (customStatusId != null) {
-            input.setCustomStatusId(customStatusId.intValue());
+            input.setCustomStatusId(customStatusId);
         }
         return input;
     }
@@ -574,7 +574,7 @@ public class ZendeskTicketTools {
             throw new IllegalArgumentException("Ticket #" + currentTicket.getId() + " is not an incident. Pass convertToIncident=true to explicitly convert it.");
         }
         input.setType(TicketUpdateInputType.INCIDENT);
-        input.setProblemId(problemId.intValue());
+        input.setProblemId(problemId);
     }
 
     @Tool(description = "Update an existing Zendesk ticket with a comment, status, priority, attachments, custom status, ticket form, or link to a problem ticket")
@@ -1010,7 +1010,7 @@ public class ZendeskTicketTools {
 
         TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId);
         if (options.problemId() != null) {
-            input.setProblemId(options.problemId().intValue());
+            input.setProblemId(options.problemId());
             input.setType(TicketUpdateInputType.INCIDENT);
         }
 
@@ -1249,10 +1249,20 @@ public class ZendeskTicketTools {
 
     @Tool(description = "Get full audit event history for a ticket, including field changes, comments, notifications, and trigger/business rule executions (via via.channel='rule', via.source.rel='trigger', via.source.from.title)")
     public TicketAuditsResponse getTicketAudits(
-            @ToolArg(description = "The numeric ticket ID") Long ticketId
+            @ToolArg(description = "The numeric ticket ID") Long ticketId,
+            @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: getTicketAudits(id={})", ticketId);
-        return ticketClient.listAuditsForTicket(ticketId).block();
+        validateKnownParameters(request, "getTicketAudits", "ticketId");
+        if (ticketId == null || ticketId <= 0) {
+            throw new IllegalArgumentException("ticketId must be a positive integer, got: " + ticketId);
+        }
+        TicketAuditsResponse response = ticketClient.listAuditsForTicket(ticketId).block();
+        return response != null ? response : new TicketAuditsResponse(Collections.emptyList(), 0, null, null);
+    }
+
+    public TicketAuditsResponse getTicketAudits(Long ticketId) {
+        return getTicketAudits(ticketId, null);
     }
 
 

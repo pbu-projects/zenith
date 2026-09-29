@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+
 /**
  * Maps HttpClientResponseException from Zendesk API calls into informative MCP errors.
  * Preserves Zendesk's diagnostic error messages (such as search syntax errors or unprocessable entity reasons).
@@ -59,7 +60,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         }
 
         String formattedMessage = String.format("Zendesk API error (HTTP %d %s): %s", statusCode, reason, diagnosis);
-        log.warn("Mapping HttpClientResponseException to MCP error: {}", formattedMessage);
+        log.error("Mapping HttpClientResponseException to MCP error: {}", formattedMessage, e);
 
         int mcpErrorCode = resolveMcpErrorCode(statusCode);
         return McpError.builder(mcpErrorCode)
@@ -69,15 +70,26 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
     private String resolveFallbackDiagnosis(HttpClientResponseException e, int statusCode, String reason) {
         String exMsg = e.getMessage();
+        String fallback;
         if (exMsg != null && exMsg.contains("The connector returned an error or an invalid response")) {
-            return switch (statusCode) {
+            fallback = switch (statusCode) {
                 case 422 -> "The upstream Zendesk API rejected the request payload (HTTP 422 Unprocessable Entity). Check that the file extension matches the file content type, the file is not empty, and format is supported.";
                 case 400 -> "The upstream Zendesk API rejected the request parameters (HTTP 400 Bad Request).";
                 default -> "The upstream Zendesk API returned an error (" + statusCode + " " + reason + ").";
             };
+        } else {
+            fallback = (exMsg != null && !exMsg.isBlank()) ? exMsg : "The upstream Zendesk API returned HTTP " + statusCode + " " + reason;
         }
-        return (exMsg != null && !exMsg.isBlank()) ? exMsg : "The upstream Zendesk API returned HTTP " + statusCode + " " + reason;
+
+        if (e.getCause() != null) {
+            String causeChain = DefaultThrowableMcpErrorMapper.formatCauseChain(e.getCause());
+            if (!causeChain.isBlank()) {
+                fallback = fallback + "; Caused by: " + causeChain;
+            }
+        }
+        return fallback;
     }
+
 
     private int resolveStatusCode(HttpResponse<?> response, HttpClientResponseException e) {
         if (response != null) {
