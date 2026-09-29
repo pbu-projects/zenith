@@ -1,0 +1,101 @@
+package lol.pbu.tools;
+
+import io.micronaut.core.annotation.Nullable;
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+
+public final class ToolValidationSupport {
+
+    private ToolValidationSupport() {}
+
+    public static void validateKnownParameters(CallToolRequest request, String toolName, String... knownParams) {
+        if (request == null || request.arguments() == null) return;
+        Set<String> known = new HashSet<>(Arrays.asList(knownParams));
+        if (request.arguments().containsKey("description") && !known.contains("description")) {
+            throw new IllegalArgumentException("Ticket description cannot be modified after creation as it is read-only in Zendesk. To add information to an existing ticket, use the 'comment' parameter instead.");
+        }
+        for (String key : request.arguments().keySet()) {
+            if (!known.contains(key)) {
+                String hint;
+                if ("uploadAttachment".equals(toolName)) {
+                    hint = "Valid parameters for uploadAttachment are 'filePath' and 'filename'.";
+                } else if ("createTicket".equals(toolName)) {
+                    hint = "If you meant to set a custom field, use the 'customFields' array parameter.";
+                } else {
+                    hint = "If you meant to update a custom field, use the 'customFields' array parameter.";
+                }
+                throw new IllegalArgumentException("Unrecognized parameter: '" + key + "'. " + hint);
+            }
+        }
+    }
+
+    public static Long resolveCustomStatusId(Long customStatusId, @Nullable CallToolRequest request) {
+        if (customStatusId != null) {
+            return customStatusId;
+        }
+        if (request != null && request.arguments() != null && request.arguments().containsKey("custom_status_id")) {
+            Object val = request.arguments().get("custom_status_id");
+            if (val instanceof Number num) {
+                return num.longValue();
+            } else if (val != null) {
+                try {
+                    return Long.parseLong(val.toString().trim());
+                } catch (NumberFormatException _) {
+                    throw new IllegalArgumentException("custom_status_id must be a numeric ID, got: " + val);
+                }
+            }
+        }
+        return null;
+    }
+
+    public static void validateCustomStatusBounds(Long customStatusId) {
+        if (customStatusId == null) return;
+        if (customStatusId <= 0) {
+            throw new IllegalArgumentException("customStatusId must be a positive integer, got: " + customStatusId);
+        }
+        if (customStatusId > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("customStatusId " + customStatusId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits custom_status_id on ticket inputs to 32-bit integers.");
+        }
+    }
+
+    public static Long resolveTicketFormId(Long ticketFormId, @Nullable CallToolRequest request) {
+        if (ticketFormId != null) {
+            return ticketFormId;
+        }
+        if (request != null && request.arguments() != null) {
+            if (request.arguments().containsKey("ticket_form_id")) {
+                Object val = request.arguments().get("ticket_form_id");
+                if (val instanceof Number num) {
+                    return num.longValue();
+                } else if (val != null) {
+                    try {
+                        return Long.parseLong(val.toString().trim());
+                    } catch (NumberFormatException _) {
+                        throw new IllegalArgumentException("ticket_form_id must be a numeric ID, got: " + val);
+                    }
+                }
+            } else if (request.arguments().containsKey("ticketFormId")) {
+                Object val = request.arguments().get("ticketFormId");
+                if (val instanceof Number num) {
+                    return num.longValue();
+                } else if (val != null) {
+                    try {
+                        return Long.parseLong(val.toString().trim());
+                    } catch (NumberFormatException _) {
+                        throw new IllegalArgumentException("ticketFormId must be a numeric ID, got: " + val);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    public static void validateTicketFormBounds(Long ticketFormId) {
+        if (ticketFormId == null) return;
+        if (ticketFormId <= 0) {
+            throw new IllegalArgumentException("ticketFormId must be a positive integer, got: " + ticketFormId);
+        }
+    }
+}
