@@ -1,7 +1,6 @@
 package lol.pbu.tools;
 
 import io.micronaut.core.annotation.Nullable;
-import io.micronaut.core.util.StringUtils;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
 import jakarta.inject.Inject;

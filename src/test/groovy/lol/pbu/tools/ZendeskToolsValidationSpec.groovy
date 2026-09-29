@@ -59,10 +59,13 @@ class ToolsComposite {
     def methodMissing(String name, args) {
         def targets = [ticketTools, searchTools, viewTools, helpCenterTools, communityTools, customObjectTools, metadataTools]
         for (target in targets) {
-            if (target == null) continue
+            if (target == null) {
+                continue
+            }
             try {
                 return target.invokeMethod(name, args)
             } catch (MissingMethodException _) {
+                // Expected when method is not declared on this delegate; try next delegate
             }
         }
         throw new MissingMethodException(name, ToolsComposite, args as Object[])
@@ -71,10 +74,13 @@ class ToolsComposite {
     def propertyMissing(String name) {
         def targets = [ticketTools, searchTools, viewTools, helpCenterTools, communityTools, customObjectTools, metadataTools]
         for (target in targets) {
-            if (target == null) continue
+            if (target == null) {
+                continue
+            }
             try {
                 return target."$name"
             } catch (MissingPropertyException _) {
+                // Expected when property is not declared on this delegate; try next delegate
             }
         }
         throw new MissingPropertyException(name, ToolsComposite)

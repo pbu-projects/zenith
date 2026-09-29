@@ -46,7 +46,9 @@ public final class ToolValidationSupport {
     }
 
     public static void validateCustomStatusBounds(Long customStatusId) {
-        if (customStatusId == null) return;
+        if (customStatusId == null) {
+            return;
+        }
         if (customStatusId <= 0) {
             throw new IllegalArgumentException("customStatusId must be a positive integer, got: " + customStatusId);
         }

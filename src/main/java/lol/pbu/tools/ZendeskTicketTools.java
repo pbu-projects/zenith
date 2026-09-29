@@ -291,7 +291,10 @@ public class ZendeskTicketTools {
         }
     }
 
-    private void validateAndApplyCustomStatus(TicketCreateInput input, Long resolvedCustomStatusId, @Nullable Long resolvedTicketFormId, @Nullable String status) {
+    private void validateAndApplyCustomStatus(TicketCreateInput input, @Nullable Long resolvedCustomStatusId, @Nullable Long resolvedTicketFormId, @Nullable String status) {
+        if (resolvedCustomStatusId == null) {
+            return;
+        }
         validateCustomStatusBounds(resolvedCustomStatusId);
         String targetStatus = (status != null && !status.isBlank()) ? status : "new";
         TicketFieldCustomStatusObject validated = validateCustomStatus(resolvedCustomStatusId, targetStatus);
