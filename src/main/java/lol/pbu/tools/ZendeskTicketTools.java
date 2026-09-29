@@ -72,6 +72,7 @@ public class ZendeskTicketTools {
     private static final String PARAM_CUSTOM_FIELDS = "customFields";
     private static final String PARAM_REQUESTER_ID = "requesterId";
     private static final String PARAM_TYPE = "type";
+    private static final String PARAM_DESCRIPTION = "description";
     private static final String PARAM_CUSTOM_STATUS_ID = "customStatusId";
     private static final String PARAM_CUSTOM_STATUS_ID_SNAKE = "custom_status_id";
     private static final String PARAM_TICKET_FORM_ID = "ticketFormId";
@@ -190,7 +191,7 @@ public class ZendeskTicketTools {
             CallToolRequest request
     ) {
         log.info("MCP Tool called: createTicket(subject='{}')", subject);
-        validateKnownParameters(request, "createTicket", "subject", PARAM_COMMENT, PARAM_IS_PUBLIC, PARAM_PRIORITY, PARAM_STATUS, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, "description", PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE);
+        validateKnownParameters(request, "createTicket", "subject", PARAM_COMMENT, PARAM_IS_PUBLIC, PARAM_PRIORITY, PARAM_STATUS, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_DESCRIPTION, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE);
 
         String initialComment = resolveInitialComment(comment, request);
         List<String> tokens = resolveUploadTokens(uploadTokens, attachmentFilePaths);
@@ -229,14 +230,14 @@ public class ZendeskTicketTools {
 
     private String resolveInitialComment(@Nullable String comment, @Nullable CallToolRequest request) {
         String initialComment = comment;
-        if (request != null && request.arguments() != null && request.arguments().containsKey("description")) {
-            Object descObj = request.arguments().get("description");
+        if (request != null && request.arguments() != null && request.arguments().containsKey(PARAM_DESCRIPTION)) {
+            Object descObj = request.arguments().get(PARAM_DESCRIPTION);
             String desc = descObj != null ? descObj.toString() : null;
-            if (StringUtils.isNotEmpty(desc)) {
-                if (StringUtils.isNotEmpty(initialComment) && !initialComment.equals(desc)) {
+            if (desc != null && !desc.isBlank()) {
+                if (initialComment != null && !initialComment.isBlank() && !initialComment.equals(desc)) {
                     throw new IllegalArgumentException("Provide either 'comment' or 'description' for the initial ticket message, not both with different content.");
                 }
-                if (StringUtils.isEmpty(initialComment)) {
+                if (initialComment == null || initialComment.isBlank()) {
                     initialComment = desc;
                 }
             }
@@ -245,26 +246,26 @@ public class ZendeskTicketTools {
     }
 
     private void validateCreateTicketInput(String subject, String initialComment, Boolean isPublic, List<String> tokens) {
-        if (StringUtils.isEmpty(initialComment) && tokens.isEmpty()) {
+        if ((initialComment == null || initialComment.isBlank()) && tokens.isEmpty()) {
             throw new IllegalArgumentException("Either 'comment' or 'description' is required when creating a ticket.");
         }
         if (isPublic == null) {
             throw new IllegalArgumentException("isPublic is required when creating a ticket. Set to true for a public initial comment, or false for an internal note.");
         }
-        if (StringUtils.isEmpty(subject) || subject.isBlank()) {
+        if (subject == null || subject.isBlank()) {
             throw new IllegalArgumentException("Ticket 'subject' is required and cannot be empty.");
         }
     }
 
     private void applyPriorityAndStatus(TicketCreateInput input, @Nullable String priority, @Nullable String status) {
-        if (StringUtils.isNotEmpty(priority)) {
+        if (priority != null && !priority.isBlank()) {
             try {
                 input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
             } catch (Exception _) {
                 log.warn("Unknown priority '{}', ignoring", priority);
             }
         }
-        if (StringUtils.isNotEmpty(status)) {
+        if (status != null && !status.isBlank()) {
             try {
                 input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
             } catch (Exception _) {
@@ -280,7 +281,7 @@ public class ZendeskTicketTools {
             }
             input.setRequesterId(requesterId.intValue());
         }
-        if (StringUtils.isNotEmpty(type)) {
+        if (type != null && !type.isBlank()) {
             if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
                 input.setType(null);
             } else {
@@ -292,7 +293,8 @@ public class ZendeskTicketTools {
 
     private void validateAndApplyCustomStatus(TicketCreateInput input, Long resolvedCustomStatusId, @Nullable Long resolvedTicketFormId, @Nullable String status) {
         validateCustomStatusBounds(resolvedCustomStatusId);
-        TicketFieldCustomStatusObject validated = validateCustomStatus(resolvedCustomStatusId, StringUtils.isNotEmpty(status) ? status : "new");
+        String targetStatus = (status != null && !status.isBlank()) ? status : "new";
+        TicketFieldCustomStatusObject validated = validateCustomStatus(resolvedCustomStatusId, targetStatus);
         if (resolvedTicketFormId != null && validated != null) {
             validateCustomStatusForForm(validated, resolvedTicketFormId);
         }
@@ -418,14 +420,14 @@ public class ZendeskTicketTools {
     }
 
     private void applyStatusAndPriority(TicketUpdateInput input, @Nullable String status, @Nullable String priority) {
-        if (StringUtils.isNotEmpty(status)) {
+        if (status != null && !status.isBlank()) {
             try {
                 input.setStatus(TicketUpdateInputStatus.fromValue(status.toLowerCase().trim()));
             } catch (Exception _) {
                 log.warn("Unknown status '{}', ignoring", status);
             }
         }
-        if (StringUtils.isNotEmpty(priority)) {
+        if (priority != null && !priority.isBlank()) {
             try {
                 input.setPriority(TicketUpdateInputPriority.fromValue(priority.toLowerCase().trim()));
             } catch (Exception _) {
@@ -1001,26 +1003,7 @@ public class ZendeskTicketTools {
             @Nullable TicketUpdateInputType parsedType,
             boolean isTypeUnset
     ) {
-        if (needsCurrentTicket(options, resolvedCustomStatusId, isTypeUnset, parsedType)) {
-            List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
-                    .flatMap(id -> {
-                        Mono<TicketResponse> showMono = ticketClient.showTicket(id);
-                        if (showMono == null) {
-                            return Mono.empty();
-                        }
-                        return showMono.onErrorResume(e -> Mono.empty())
-                                .filter(resp -> resp != null && resp.getTicket() != null)
-                                .map(TicketResponse::getTicket);
-                    })
-                    .collectList()
-                    .block();
-            if (currentTickets != null) {
-                for (Ticket currentTicket : currentTickets) {
-                    TicketUpdateInput testInput = new TicketUpdateInput();
-                    validateTicketState(currentTicket.getId(), currentTicket, options, testInput, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus);
-                }
-            }
-        }
+        validateCurrentTicketsForBulkAsync(distinctIds, options, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset);
 
         TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId);
         if (options.problemId() != null) {
@@ -1028,6 +1011,43 @@ public class ZendeskTicketTools {
             input.setType(TicketUpdateInputType.INCIDENT);
         }
 
+        List<JobStatus> jobStatuses = sendBulkUpdateChunks(distinctIds, input);
+        return new BatchUpdateResponse(jobStatuses.size() == 1 ? jobStatuses.get(0) : null, jobStatuses.isEmpty() ? null : jobStatuses, null);
+    }
+
+    private void validateCurrentTicketsForBulkAsync(
+            List<Long> distinctIds,
+            TicketMutationOptions options,
+            @Nullable Long resolvedCustomStatusId,
+            @Nullable Long resolvedTicketFormId,
+            @Nullable TicketFieldCustomStatusObject validatedCustomStatus,
+            @Nullable TicketUpdateInputType parsedType,
+            boolean isTypeUnset
+    ) {
+        if (!needsCurrentTicket(options, resolvedCustomStatusId, isTypeUnset, parsedType)) {
+            return;
+        }
+        List<Ticket> currentTickets = Flux.fromIterable(distinctIds)
+                .flatMap(id -> {
+                    Mono<TicketResponse> showMono = ticketClient.showTicket(id);
+                    if (showMono == null) {
+                        return Mono.empty();
+                    }
+                    return showMono.onErrorResume(e -> Mono.empty())
+                            .filter(resp -> resp != null && resp.getTicket() != null)
+                            .map(TicketResponse::getTicket);
+                })
+                .collectList()
+                .block();
+        if (currentTickets != null) {
+            for (Ticket currentTicket : currentTickets) {
+                TicketUpdateInput testInput = new TicketUpdateInput();
+                validateTicketState(currentTicket.getId(), currentTicket, options, testInput, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus);
+            }
+        }
+    }
+
+    private List<JobStatus> sendBulkUpdateChunks(List<Long> distinctIds, TicketUpdateInput input) {
         List<JobStatus> jobStatuses = new ArrayList<>();
         for (int i = 0; i < distinctIds.size(); i += 100) {
             List<Long> chunk = distinctIds.subList(i, Math.min(distinctIds.size(), i + 100));
@@ -1037,7 +1057,7 @@ public class ZendeskTicketTools {
                 jobStatuses.add(jobResponse.getJobStatus());
             }
         }
-        return new BatchUpdateResponse(jobStatuses.size() == 1 ? jobStatuses.get(0) : null, jobStatuses.isEmpty() ? null : jobStatuses, null);
+        return jobStatuses;
     }
 
     private BatchUpdateResponse executeConcurrentBatchUpdate(
@@ -1054,31 +1074,8 @@ public class ZendeskTicketTools {
         List<TicketUpdateResult> results = Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
                     TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId);
-
-                    Mono<TicketUpdateInput> inputMono;
-                    if (needsCurrentTicket(options, resolvedCustomStatusId, isTypeUnset, parsedType)) {
-                        Mono<TicketResponse> showMono = ticketClient.showTicket(id);
-                        if (showMono != null) {
-                            inputMono = showMono
-                                    .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?")))
-                                    .flatMap(resp -> {
-                                        if (resp.getTicket() == null) {
-                                            return Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?"));
-                                        }
-                                        Ticket currentTicket = resp.getTicket();
-                                        validateTicketState(id, currentTicket, options, input, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus);
-                                        return Mono.just(input);
-                                    });
-                        } else {
-                            inputMono = Mono.just(input);
-                        }
-                    } else {
-                        inputMono = Mono.just(input);
-                    }
-
-                    return inputMono.flatMap(resolvedInput ->
-                                    ticketClient.updateTicket(id, new TicketUpdateRequest(resolvedInput))
-                            )
+                    return resolveTicketUpdateInput(id, options, input, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus)
+                            .flatMap(resolvedInput -> ticketClient.updateTicket(id, new TicketUpdateRequest(resolvedInput)))
                             .map(resp -> new TicketUpdateResult(id, true, resp != null ? resp.getTicket() : null, null))
                             .onErrorResume(e -> {
                                 log.warn("Failed to update ticket {}: {}", id, e.getMessage());
@@ -1089,6 +1086,35 @@ public class ZendeskTicketTools {
                 .block();
 
         return new BatchUpdateResponse(null, null, results != null ? results : Collections.emptyList());
+    }
+
+    private Mono<TicketUpdateInput> resolveTicketUpdateInput(
+            Long id,
+            TicketMutationOptions options,
+            TicketUpdateInput input,
+            @Nullable TicketUpdateInputType parsedType,
+            boolean isTypeUnset,
+            @Nullable Long resolvedCustomStatusId,
+            @Nullable Long resolvedTicketFormId,
+            @Nullable TicketFieldCustomStatusObject validatedCustomStatus
+    ) {
+        if (!needsCurrentTicket(options, resolvedCustomStatusId, isTypeUnset, parsedType)) {
+            return Mono.just(input);
+        }
+        Mono<TicketResponse> showMono = ticketClient.showTicket(id);
+        if (showMono == null) {
+            return Mono.just(input);
+        }
+        return showMono
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?")))
+                .flatMap(resp -> {
+                    if (resp.getTicket() == null) {
+                        return Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?"));
+                    }
+                    Ticket currentTicket = resp.getTicket();
+                    validateTicketState(id, currentTicket, options, input, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus);
+                    return Mono.just(input);
+                });
     }
 
     public BatchUpdateResponse batchUpdateTickets(

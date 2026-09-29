@@ -4,7 +4,7 @@ import io.micronaut.test.annotation.MockBean
 import io.micronaut.test.extensions.spock.annotation.MicronautTest
 import spock.lang.Specification
 import jakarta.inject.Inject
-import lol.pbu.tools.ZendeskTools
+import lol.pbu.tools.ZendeskSearchTools
 import lol.pbu.z4j.client.SearchClient
 import lol.pbu.z4j.model.SearchResponse
 import lol.pbu.z4j.model.SearchResult
@@ -14,7 +14,7 @@ import reactor.core.publisher.Mono
 class SearchPaginationSpec extends Specification {
 
     @Inject
-    ZendeskTools zendeskTools
+    ZendeskSearchTools zendeskTools
 
     @Inject
     SearchClient searchClient

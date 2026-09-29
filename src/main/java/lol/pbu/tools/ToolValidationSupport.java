@@ -8,6 +8,10 @@ import java.util.Set;
 
 public final class ToolValidationSupport {
 
+    public static final String PARAM_CUSTOM_STATUS_ID_SNAKE = "custom_status_id";
+    public static final String PARAM_TICKET_FORM_ID_SNAKE = "ticket_form_id";
+    public static final String PARAM_TICKET_FORM_ID_CAMEL = "ticketFormId";
+
     private ToolValidationSupport() {}
 
     public static void validateKnownParameters(CallToolRequest request, String toolName, String... knownParams) {
@@ -35,8 +39,8 @@ public final class ToolValidationSupport {
         if (customStatusId != null) {
             return customStatusId;
         }
-        if (request != null && request.arguments() != null && request.arguments().containsKey("custom_status_id")) {
-            return parseLongArgument(request.arguments().get("custom_status_id"), "custom_status_id");
+        if (request != null && request.arguments() != null && request.arguments().containsKey(PARAM_CUSTOM_STATUS_ID_SNAKE)) {
+            return parseLongArgument(request.arguments().get(PARAM_CUSTOM_STATUS_ID_SNAKE), PARAM_CUSTOM_STATUS_ID_SNAKE);
         }
         return null;
     }
@@ -56,11 +60,11 @@ public final class ToolValidationSupport {
             return ticketFormId;
         }
         if (request != null && request.arguments() != null) {
-            if (request.arguments().containsKey("ticket_form_id")) {
-                return parseLongArgument(request.arguments().get("ticket_form_id"), "ticket_form_id");
+            if (request.arguments().containsKey(PARAM_TICKET_FORM_ID_SNAKE)) {
+                return parseLongArgument(request.arguments().get(PARAM_TICKET_FORM_ID_SNAKE), PARAM_TICKET_FORM_ID_SNAKE);
             }
-            if (request.arguments().containsKey("ticketFormId")) {
-                return parseLongArgument(request.arguments().get("ticketFormId"), "ticketFormId");
+            if (request.arguments().containsKey(PARAM_TICKET_FORM_ID_CAMEL)) {
+                return parseLongArgument(request.arguments().get(PARAM_TICKET_FORM_ID_CAMEL), PARAM_TICKET_FORM_ID_CAMEL);
             }
         }
         return null;

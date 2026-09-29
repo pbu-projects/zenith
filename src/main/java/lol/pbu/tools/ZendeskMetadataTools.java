@@ -159,7 +159,7 @@ public class ZendeskMetadataTools {
     }
 
     private String validateAndNormalizeCategory(@Nullable String statusCategory) {
-        if (StringUtils.isNotEmpty(statusCategory)) {
+        if (statusCategory != null && !statusCategory.isBlank()) {
             String normalizedCategory = statusCategory.trim().toLowerCase();
             Set<String> validCategories = Set.of("new", "open", "pending", "hold", "solved");
             if (!validCategories.contains(normalizedCategory)) {

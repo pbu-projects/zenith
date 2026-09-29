@@ -32,7 +32,7 @@ public class ZendeskSearchTools {
     }
 
     private String resolveInclude(@Nullable String include) {
-        if (StringUtils.isEmpty(include)) {
+        if (include == null || include.isBlank()) {
             return null;
         }
         String trimmed = include.trim();

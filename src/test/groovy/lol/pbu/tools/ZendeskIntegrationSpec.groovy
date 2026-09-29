@@ -19,7 +19,16 @@ class ZendeskIntegrationSpec extends Specification {
     ApplicationContext context
 
     @Shared
-    ZendeskTools tools
+    ZendeskHelpCenterTools helpCenterTools
+
+    @Shared
+    ZendeskCommunityTools communityTools
+
+    @Shared
+    ZendeskViewTools viewTools
+
+    @Shared
+    ZendeskTicketTools ticketTools
 
     def setupSpec() {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
@@ -30,7 +39,10 @@ class ZendeskIntegrationSpec extends Specification {
                 "micronaut.http.services.zendesk.url": "http://127.0.0.1:${server.address.port}",
                 "micronaut.http.services.zendesk.oauth.token": "test-token"
         ])
-        tools = context.getBean(ZendeskTools)
+        helpCenterTools = context.getBean(ZendeskHelpCenterTools)
+        communityTools = context.getBean(ZendeskCommunityTools)
+        viewTools = context.getBean(ZendeskViewTools)
+        ticketTools = context.getBean(ZendeskTicketTools)
     }
 
     def cleanupSpec() {
@@ -40,7 +52,7 @@ class ZendeskIntegrationSpec extends Specification {
 
     def "Help Center articles end-to-end integration via embedded HTTP server"() {
         when: "listing articles"
-        def listResp = tools.listArticles("en-us", "title", "asc", 1000L, "guide")
+        def listResp = helpCenterTools.listArticles("en-us", "title", "asc", 1000L, "guide")
 
         then:
         listResp != null
@@ -49,7 +61,7 @@ class ZendeskIntegrationSpec extends Specification {
         listResp.articles[0].id == 200L
 
         when: "getting an article"
-        def article = tools.getArticle(200L, "en-us")
+        def article = helpCenterTools.getArticle(200L, "en-us")
 
         then:
         article != null
@@ -57,14 +69,14 @@ class ZendeskIntegrationSpec extends Specification {
         article.article.title == "Test Article"
 
         when: "creating an article"
-        def created = tools.createArticle(10L, "New Article", "<p>Content</p>", 5L, "en-us", true, ["test"], 1L)
+        def created = helpCenterTools.createArticle(10L, "New Article", "<p>Content</p>", 5L, "en-us", true, ["test"], 1L)
 
         then:
         created != null
         created.article.id == 201L
 
         when: "updating an article"
-        def updated = tools.updateArticle(200L, "Updated Title", "Updated Body", "en-us", false, 6L, ["updated"], 2L)
+        def updated = helpCenterTools.updateArticle(200L, "Updated Title", "Updated Body", "en-us", false, 6L, ["updated"], 2L)
 
         then:
         updated != null
@@ -72,7 +84,7 @@ class ZendeskIntegrationSpec extends Specification {
         updated.article.title == "Updated Title"
 
         when: "deleting an article"
-        def deleted = tools.deleteArticle(200L, true, "en-us")
+        def deleted = helpCenterTools.deleteArticle(200L, true, "en-us")
 
         then:
         deleted.success == true
@@ -81,7 +93,7 @@ class ZendeskIntegrationSpec extends Specification {
 
     def "Community tools end-to-end integration via embedded HTTP server"() {
         when: "listing topics"
-        def topics = tools.listCommunityTopics()
+        def topics = communityTools.listCommunityTopics()
 
         then:
         topics != null
@@ -90,22 +102,22 @@ class ZendeskIntegrationSpec extends Specification {
         topics.topics[0].name == "General Discussion"
 
         when: "getting a topic"
-        def topic = tools.getCommunityTopic(10L)
+        def topic = communityTools.getCommunityTopic(10L)
 
         then:
         topic != null
         topic.topic.id == 10L
 
         when: "listing posts (all and by topic)"
-        def allPosts = tools.listCommunityPosts(null)
-        def topicPosts = tools.listCommunityPosts(10L)
+        def allPosts = communityTools.listCommunityPosts(null)
+        def topicPosts = communityTools.listCommunityPosts(10L)
 
         then:
         allPosts.posts.size() == 1
         topicPosts.posts.size() == 1
 
         when: "getting a single post"
-        def post = tools.getCommunityPost(100L)
+        def post = communityTools.getCommunityPost(100L)
 
         then:
         post != null
@@ -113,7 +125,7 @@ class ZendeskIntegrationSpec extends Specification {
         post.post.title == "Post 100"
 
         when: "searching community posts"
-        def search = tools.searchCommunityPosts("test query")
+        def search = communityTools.searchCommunityPosts("test query")
 
         then:
         search != null
@@ -121,7 +133,7 @@ class ZendeskIntegrationSpec extends Specification {
         search.results[0].id == 100L
 
         when: "listing post comments"
-        def comments = tools.listCommunityPostComments(100L)
+        def comments = communityTools.listCommunityPostComments(100L)
 
         then:
         comments != null
@@ -131,12 +143,12 @@ class ZendeskIntegrationSpec extends Specification {
 
     def "Views, Translations, and Categories end-to-end integration via embedded HTTP server"() {
         when: "views tools"
-        def views = tools.listViews()
-        def activeViews = tools.listActiveViews()
-        def view = tools.getView(50L)
-        def viewTickets = tools.getViewTickets(50L)
-        def executed = tools.executeView(50L)
-        def count = tools.getViewTicketCount(50L)
+        def views = viewTools.listViews()
+        def activeViews = viewTools.listActiveViews()
+        def view = viewTools.getView(50L)
+        def viewTickets = viewTools.getViewTickets(50L)
+        def executed = viewTools.executeView(50L)
+        def count = viewTools.getViewTicketCount(50L)
 
         then:
         views.views.size() == 1
@@ -147,18 +159,18 @@ class ZendeskIntegrationSpec extends Specification {
         count.viewCount.value == 42
 
         when: "translations tools"
-        def translations = tools.listTranslations("articles", 200L)
-        def translation = tools.getTranslation("articles", 200L, "en-us")
+        def translations = helpCenterTools.listTranslations("articles", 200L)
+        def translation = helpCenterTools.getTranslation("articles", 200L, "en-us")
 
         then:
         translations.translations.size() == 1
         translation.translation.id == 300L
 
         when: "categories tools"
-        def categoriesWithLocale = tools.listCategories("en-us")
-        def categoriesNoLocale = tools.listCategories(null)
-        def categoryWithLocale = tools.getCategory(400L, "en-us")
-        def categoryNoLocale = tools.getCategory(400L, null)
+        def categoriesWithLocale = helpCenterTools.listCategories("en-us")
+        def categoriesNoLocale = helpCenterTools.listCategories(null)
+        def categoryWithLocale = helpCenterTools.getCategory(400L, "en-us")
+        def categoryNoLocale = helpCenterTools.getCategory(400L, null)
 
         then:
         categoriesWithLocale.categories.size() == 1
@@ -169,13 +181,13 @@ class ZendeskIntegrationSpec extends Specification {
 
     def "error handling: upstream HTTP 422 is propagated as HttpClientResponseException and 404 returns null"() {
         when: "404 Not Found"
-        def notFound = tools.getCommunityTopic(404L)
+        def notFound = communityTools.getCommunityTopic(404L)
 
         then: "Micronaut declarative HTTP client maps 404 to empty/null"
         notFound == null
 
         when: "422 Unprocessable Entity"
-        tools.getCommunityTopic(422L)
+        communityTools.getCommunityTopic(422L)
 
         then: "propagates HttpClientResponseException"
         def e = thrown(HttpClientResponseException)
@@ -185,7 +197,7 @@ class ZendeskIntegrationSpec extends Specification {
 
     def "non-numeric ticket ID format in getTickets is handled safely without network call"() {
         when:
-        def result = tools.getTickets(["non-numeric-id", "not-a-number"])
+        def result = ticketTools.getTickets(["non-numeric-id", "not-a-number"])
 
         then:
         result != null
