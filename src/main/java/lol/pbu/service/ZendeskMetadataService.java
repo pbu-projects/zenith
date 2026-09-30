@@ -16,7 +16,6 @@
 package lol.pbu.service;
 
 import io.micronaut.core.annotation.Nullable;
-import io.micronaut.core.util.StringUtils;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lol.pbu.client.CustomStatusClient;
@@ -308,7 +307,7 @@ public class ZendeskMetadataService {
     }
 
     private void validateCategoryMatch(TicketFieldCustomStatusObject statusObj, Long customStatusId, @Nullable String targetStatus, List<TicketFieldCustomStatusObject> statuses) {
-        if (StringUtils.isNotEmpty(targetStatus)) {
+        if (targetStatus != null && !targetStatus.isBlank()) {
             String expectedCat = targetStatus.trim().toLowerCase();
             String actualCat = statusObj.getStatusCategory() != null ? statusObj.getStatusCategory().getValue() : null;
             if (actualCat != null && !actualCat.equalsIgnoreCase(expectedCat)) {
