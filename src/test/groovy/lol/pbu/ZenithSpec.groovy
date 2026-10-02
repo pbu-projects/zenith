@@ -1,10 +1,14 @@
 package lol.pbu
 
 
+import io.micronaut.json.JsonMapper
 import io.micronaut.runtime.EmbeddedApplication
 import io.micronaut.test.extensions.spock.annotation.MicronautTest
-import spock.lang.Specification
 import jakarta.inject.Inject
+import lol.pbu.tools.ZendeskCustomObjectTools
+import lol.pbu.tools.ZendeskMetadataTools
+import lol.pbu.tools.ZendeskTicketTools
+import spock.lang.Specification
 
 @MicronautTest
 class ZenithSpec extends Specification {
@@ -13,13 +17,13 @@ class ZenithSpec extends Specification {
     EmbeddedApplication<?> application
 
     @Inject
-    lol.pbu.tools.ZendeskTicketTools ticketTools
+    ZendeskTicketTools ticketTools
 
     @Inject
-    lol.pbu.tools.ZendeskMetadataTools metadataTools
+    ZendeskMetadataTools metadataTools
 
     @Inject
-    lol.pbu.tools.ZendeskCustomObjectTools customObjectTools
+    ZendeskCustomObjectTools customObjectTools
 
     void 'test it works'() {
         expect:
@@ -125,5 +129,5 @@ class ZenithSpec extends Specification {
     }
 
     @Inject
-    io.micronaut.json.JsonMapper jsonMapper
+    JsonMapper jsonMapper
 }

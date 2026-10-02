@@ -223,7 +223,7 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
 
     def "extracts error diagnosis from byte[] raw response body"() {
         given:
-        byte[] bytes = '{"error":"InvalidData","description":"Byte payload error"}'.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        byte[] bytes = '{"error":"InvalidData","description":"Byte payload error"}'.getBytes(StandardCharsets.UTF_8)
         def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(bytes)
         def ex = new HttpClientResponseException("Bad Request", response)
 

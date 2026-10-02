@@ -1,5 +1,9 @@
 package lol.pbu.tools
 
+import io.micronaut.http.HttpResponse
+import io.micronaut.http.HttpStatus
+import io.micronaut.http.client.exceptions.HttpClientResponseException
+import io.micronaut.serde.ObjectMapper
 import spock.lang.Specification
 
 class DefaultThrowableMcpErrorMapperSpec extends Specification {
@@ -39,13 +43,13 @@ class DefaultThrowableMcpErrorMapperSpec extends Specification {
 
     def "unwraps causal chain and delegates to HttpClientResponseExceptionMcpErrorMapper"() {
         given:
-        def objectMapper = io.micronaut.serde.ObjectMapper.getDefault()
+        def objectMapper = ObjectMapper.getDefault()
         def httpMapper = new HttpClientResponseExceptionMcpErrorMapper(objectMapper)
         def mapperWithDelegates = new DefaultThrowableMcpErrorMapper(httpMapper, null)
 
-        def response = io.micronaut.http.HttpResponse.status(io.micronaut.http.HttpStatus.UNPROCESSABLE_ENTITY)
+        def response = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body('{"error":"RecordInvalid","description":"Validation failed"}')
-        def httpEx = new io.micronaut.http.client.exceptions.HttpClientResponseException("Unprocessable", response)
+        def httpEx = new HttpClientResponseException("Unprocessable", response)
         def wrappedEx = new RuntimeException("Outer wrapper", new IllegalStateException("Middle wrapper", httpEx))
 
         when:

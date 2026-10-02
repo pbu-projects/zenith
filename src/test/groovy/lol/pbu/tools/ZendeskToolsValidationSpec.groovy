@@ -53,6 +53,28 @@ import lol.pbu.z4j.model.TicketUpdateInputStatus
 import lol.pbu.z4j.model.TicketUpdateInputType
 import lol.pbu.z4j.model.TicketUpdateRequest
 import lol.pbu.z4j.model.TicketUpdateResponse
+import lol.pbu.z4j.model.TicketsResponse
+import lol.pbu.z4j.model.ArticleResponse
+import lol.pbu.z4j.model.ArticlesResponse
+import lol.pbu.z4j.model.AttachmentUploadResponse
+import lol.pbu.z4j.model.AttachmentUploadResponseUpload
+import lol.pbu.z4j.model.CategoriesResponse
+import lol.pbu.z4j.model.CategoryResponse
+import lol.pbu.z4j.model.CommunityPostSearchResponse
+import lol.pbu.z4j.model.PostCommentsResponse
+import lol.pbu.z4j.model.PostResponse
+import lol.pbu.z4j.model.PostsResponse
+import lol.pbu.z4j.model.TopicResponse
+import lol.pbu.z4j.model.TopicsResponse
+import lol.pbu.z4j.model.TranslationResponse
+import lol.pbu.z4j.model.TranslationsResponse
+import lol.pbu.z4j.model.ViewCountResponse
+import lol.pbu.z4j.model.ViewExecuteResponse
+import lol.pbu.z4j.model.ViewResponse
+import lol.pbu.z4j.model.ViewsResponse
+import io.micronaut.http.HttpResponse
+import io.micronaut.http.HttpStatus
+import io.micronaut.http.client.exceptions.HttpClientResponseException
 import spock.lang.Specification
 import spock.lang.TempDir
 import java.nio.file.Path
@@ -342,30 +364,30 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "successfully executes Help Center, Views, Translations, and Community tools happy paths"() {
         given:
-        articleClient.createArticle(*_) >> Mono.just(new lol.pbu.z4j.model.ArticleResponse())
-        articleClient.updateArticle(*_) >> Mono.just(new lol.pbu.z4j.model.ArticleResponse())
+        articleClient.createArticle(*_) >> Mono.just(new ArticleResponse())
+        articleClient.updateArticle(*_) >> Mono.just(new ArticleResponse())
         articleClient.deleteArticle(*_) >> Mono.empty()
-        articleClient.listArticles(*_) >> Mono.just(new lol.pbu.z4j.model.ArticlesResponse())
-        articleClient.showArticle(*_) >> Mono.just(new lol.pbu.z4j.model.ArticleResponse())
-        viewClient.listViews() >> Mono.just(new lol.pbu.z4j.model.ViewsResponse())
-        viewClient.listActiveViews() >> Mono.just(new lol.pbu.z4j.model.ViewsResponse())
-        viewClient.listTicketsForView(*_) >> Mono.just(new lol.pbu.z4j.model.TicketsResponse())
-        viewClient.showView(*_) >> Mono.just(new lol.pbu.z4j.model.ViewResponse())
-        viewClient.executeView(*_) >> Mono.just(new lol.pbu.z4j.model.ViewExecuteResponse())
-        viewClient.countView(*_) >> Mono.just(new lol.pbu.z4j.model.ViewCountResponse())
-        translationClient.listTranslations(*_) >> Mono.just(new lol.pbu.z4j.model.TranslationsResponse())
-        translationClient.showTranslation(*_) >> Mono.just(new lol.pbu.z4j.model.TranslationResponse())
-        categoryClient.listCategories(*_) >> Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
-        categoryClient.listCategoriesNoLocale(*_) >> Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
-        categoryClient.showCategory(*_) >> Mono.just(new lol.pbu.z4j.model.CategoryResponse())
-        categoryClient.showCategoryNoLocale(*_) >> Mono.just(new lol.pbu.z4j.model.CategoryResponse())
-        topicClient.showTopic(*_) >> Mono.just(new lol.pbu.z4j.model.TopicResponse())
-        topicClient.listTopics() >> Mono.just(new lol.pbu.z4j.model.TopicsResponse())
-        postClient.showPost(*_) >> Mono.just(new lol.pbu.z4j.model.PostResponse())
-        postClient.listPosts() >> Mono.just(new lol.pbu.z4j.model.PostsResponse())
-        postClient.listPostsByTopic(*_) >> Mono.just(new lol.pbu.z4j.model.PostsResponse())
-        postClient.searchPosts(*_) >> Mono.just(new lol.pbu.z4j.model.CommunityPostSearchResponse())
-        postClient.listPostComments(*_) >> Mono.just(new lol.pbu.z4j.model.PostCommentsResponse())
+        articleClient.listArticles(*_) >> Mono.just(new ArticlesResponse())
+        articleClient.showArticle(*_) >> Mono.just(new ArticleResponse())
+        viewClient.listViews() >> Mono.just(new ViewsResponse())
+        viewClient.listActiveViews() >> Mono.just(new ViewsResponse())
+        viewClient.listTicketsForView(*_) >> Mono.just(new TicketsResponse())
+        viewClient.showView(*_) >> Mono.just(new ViewResponse())
+        viewClient.executeView(*_) >> Mono.just(new ViewExecuteResponse())
+        viewClient.countView(*_) >> Mono.just(new ViewCountResponse())
+        translationClient.listTranslations(*_) >> Mono.just(new TranslationsResponse())
+        translationClient.showTranslation(*_) >> Mono.just(new TranslationResponse())
+        categoryClient.listCategories(*_) >> Mono.just(new CategoriesResponse())
+        categoryClient.listCategoriesNoLocale(*_) >> Mono.just(new CategoriesResponse())
+        categoryClient.showCategory(*_) >> Mono.just(new CategoryResponse())
+        categoryClient.showCategoryNoLocale(*_) >> Mono.just(new CategoryResponse())
+        topicClient.showTopic(*_) >> Mono.just(new TopicResponse())
+        topicClient.listTopics() >> Mono.just(new TopicsResponse())
+        postClient.showPost(*_) >> Mono.just(new PostResponse())
+        postClient.listPosts() >> Mono.just(new PostsResponse())
+        postClient.listPostsByTopic(*_) >> Mono.just(new PostsResponse())
+        postClient.searchPosts(*_) >> Mono.just(new CommunityPostSearchResponse())
+        postClient.listPostComments(*_) >> Mono.just(new PostCommentsResponse())
 
         expect:
         tools.createArticle(1L, "Title", "<p>Body</p>", 2L, "en-us", false, ["label1"], 3L) != null
@@ -400,24 +422,24 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listTicketForms handles full payload, summary mode, active filtering, and empty responses"() {
         given:
-        def form1 = new lol.pbu.z4j.model.TicketForm().tap {
+        def form1 = new TicketForm().tap {
             id = 1L
             name = "Form 1"
             displayName = "Display 1"
             active = true
             defaultForm = true
         }
-        def form2 = new lol.pbu.z4j.model.TicketForm().tap {
+        def form2 = new TicketForm().tap {
             id = 2L
             name = "Form 2"
             displayName = "Display 2"
             active = false
             defaultForm = false
         }
-        def responseWithForms = new lol.pbu.z4j.model.TicketFormsResponse().tap {
+        def responseWithForms = new TicketFormsResponse().tap {
             ticketForms = [form1, form2]
         }
-        def emptyResponse = new lol.pbu.z4j.model.TicketFormsResponse().tap {
+        def emptyResponse = new TicketFormsResponse().tap {
             ticketForms = null
         }
 
@@ -443,7 +465,7 @@ class ZendeskToolsValidationSpec extends Specification {
         rSummaryActiveOnly.ticket_forms[0].id == 1L
         rSummaryAll.ticket_forms.size() == 2
         rFullAll.ticket_forms.size() == 2
-        rFullAll.ticket_forms[0] instanceof lol.pbu.z4j.model.TicketForm
+        rFullAll.ticket_forms[0] instanceof TicketForm
     }
 
     def "parseCustomFields handles various inputs and validates custom fields"() {
@@ -1346,7 +1368,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "resolveTargetFilename resolves base filename and trims custom filenames"() {
         given:
-        def p = java.nio.file.Path.of("/tmp/path/to/my-file.txt")
+        def p = Path.of("/tmp/path/to/my-file.txt")
 
         expect:
         tools.resolveTargetFilename(p, null) == "my-file.txt"
@@ -1384,7 +1406,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "probeContentType detects MIME types by extension with fallback"() {
         given:
-        def dummyPath = java.nio.file.Path.of("nonexistent-file.unknown")
+        def dummyPath = Path.of("nonexistent-file.unknown")
 
         expect:
         tools.probeContentType(dummyPath, "image.png") == "image/png"
@@ -1405,8 +1427,8 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         File tempFile = tempDir.resolve("zenith-upload-valid.txt").toFile()
         tempFile.text = "Hello upload test content"
-        def mockResp = new lol.pbu.z4j.model.AttachmentUploadResponse().tap {
-            upload = new lol.pbu.z4j.model.AttachmentUploadResponseUpload().tap {
+        def mockResp = new AttachmentUploadResponse().tap {
+            upload = new AttachmentUploadResponseUpload().tap {
                 token = "mock-upload-token-123"
             }
         }
@@ -1434,16 +1456,16 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         File tempFile = tempDir.resolve("zenith-upload-fail.png").toFile()
         tempFile.text = "not a real png"
-        def httpResponse = io.micronaut.http.HttpResponse.status(io.micronaut.http.HttpStatus.UNPROCESSABLE_ENTITY)
+        def httpResponse = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body('{"error":"RecordInvalid","description":"The file type and file extension do not match."}')
-        def httpEx = new io.micronaut.http.client.exceptions.HttpClientResponseException("Unprocessable Entity", httpResponse)
+        def httpEx = new HttpClientResponseException("Unprocessable Entity", httpResponse)
         attachmentClient.uploadAttachment(*_) >> Mono.error(httpEx)
 
         when:
         tools.uploadAttachment(tempFile.absolutePath, null)
 
         then: "HttpClientResponseException is thrown directly so McpErrorMapper can map it"
-        def thrownEx = thrown(io.micronaut.http.client.exceptions.HttpClientResponseException)
+        def thrownEx = thrown(HttpClientResponseException)
         thrownEx.response.code() == 422
     }
 
@@ -1451,8 +1473,8 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         File tempFile = tempDir.resolve("zenith-token-test.txt").toFile()
         tempFile.text = "Upload token test content"
-        def mockResp = new lol.pbu.z4j.model.AttachmentUploadResponse().tap {
-            upload = new lol.pbu.z4j.model.AttachmentUploadResponseUpload().tap {
+        def mockResp = new AttachmentUploadResponse().tap {
+            upload = new AttachmentUploadResponseUpload().tap {
                 token = "resolved-token-xyz"
             }
         }
