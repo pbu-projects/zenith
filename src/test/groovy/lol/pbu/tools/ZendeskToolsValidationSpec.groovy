@@ -78,6 +78,7 @@ import io.micronaut.http.HttpStatus
 import io.micronaut.http.client.exceptions.HttpClientResponseException
 import spock.lang.Specification
 import spock.lang.TempDir
+import java.nio.file.Files
 import java.nio.file.Path
 
 class ToolsComposite implements GroovyInterceptable {
@@ -1370,6 +1371,105 @@ class ZendeskToolsValidationSpec extends Specification {
 
         cleanup:
         System.setProperty("user.home", originalHome)
+    }
+
+    def "isSensitiveFilename correctly identifies sensitive filenames"() {
+        expect:
+        ZendeskTicketTools.isSensitiveFilename(".env")
+        ZendeskTicketTools.isSensitiveFilename(".env.local")
+        ZendeskTicketTools.isSensitiveFilename(".env.production")
+        ZendeskTicketTools.isSensitiveFilename("id_rsa")
+        ZendeskTicketTools.isSensitiveFilename("id_rsa.pub")
+        ZendeskTicketTools.isSensitiveFilename("id_ed25519")
+        ZendeskTicketTools.isSensitiveFilename("id_ed25519.pub")
+        ZendeskTicketTools.isSensitiveFilename("authorized_keys")
+        ZendeskTicketTools.isSensitiveFilename("known_hosts")
+        ZendeskTicketTools.isSensitiveFilename(".bash_history")
+        ZendeskTicketTools.isSensitiveFilename(".zsh_history")
+        ZendeskTicketTools.isSensitiveFilename(".netrc")
+        ZendeskTicketTools.isSensitiveFilename(".npmrc")
+        ZendeskTicketTools.isSensitiveFilename(".git-credentials")
+        ZendeskTicketTools.isSensitiveFilename("credentials.json")
+        ZendeskTicketTools.isSensitiveFilename("client_secret.json")
+        ZendeskTicketTools.isSensitiveFilename("passwd")
+        ZendeskTicketTools.isSensitiveFilename("shadow")
+        ZendeskTicketTools.isSensitiveFilename(".htpasswd")
+
+        and: "innocent filenames are not considered sensitive"
+        !ZendeskTicketTools.isSensitiveFilename("image.png")
+        !ZendeskTicketTools.isSensitiveFilename("notes.txt")
+        !ZendeskTicketTools.isSensitiveFilename("data.csv")
+        !ZendeskTicketTools.isSensitiveFilename("environment.md")
+        !ZendeskTicketTools.isSensitiveFilename("identity.png")
+    }
+
+    def "isSensitiveSystemPath identifies system and credential paths"() {
+        expect:
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/etc/passwd"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/etc/hosts"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/proc/cpuinfo"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/sys/devices"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/dev/null"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/boot/vmlinuz"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/root/.bashrc"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/private/etc/hosts"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/.ssh/id_rsa"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/.aws/credentials"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/.gnupg/secring.gpg"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/project/.git/config"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/var/app/.env"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/var/app/.env.local"))
+
+        and: "innocent paths are not flagged"
+        !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/tmp/test.png"))
+        !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/documents/report.pdf"))
+        !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/var/app/logs/output.log"))
+    }
+
+    def "validateAndResolveFilePath rejects sensitive system files, credential files, and symlinks"() {
+        when: "attempting to upload /etc/hosts or /etc/passwd"
+        tools.validateAndResolveFilePath("/etc/passwd")
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
+
+        when: "attempting to upload a .env file"
+        File envFile = tempDir.resolve(".env").toFile()
+        envFile.text = "SECRET_KEY=12345"
+        tools.validateAndResolveFilePath(envFile.absolutePath)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
+
+        when: "attempting to upload via symlink pointing to sensitive system file"
+        File symlink = tempDir.resolve("innocent.txt").toFile()
+        File realTarget = new File("/etc/hosts")
+        if (realTarget.exists()) {
+            Files.createSymbolicLink(symlink.toPath(), realTarget.toPath())
+            tools.validateAndResolveFilePath(symlink.absolutePath)
+        } else {
+            File secretFile = tempDir.resolve("secret").toFile()
+            secretFile.mkdirs()
+            File secretCredentials = new File(secretFile, "credentials.json")
+            secretCredentials.text = "secret"
+            Files.createSymbolicLink(symlink.toPath(), secretCredentials.toPath())
+            tools.validateAndResolveFilePath(symlink.absolutePath)
+        }
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
+    }
+
+    def "uploadAttachment rejects sensitive file paths"() {
+        when: "calling uploadAttachment with sensitive file path"
+        tools.uploadAttachment("/etc/passwd", null)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
     }
 
     def "resolveTargetFilename resolves base filename and trims custom filenames"() {

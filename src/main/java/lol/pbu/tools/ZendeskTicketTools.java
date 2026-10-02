@@ -54,6 +54,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Singleton
@@ -876,6 +877,78 @@ public class ZendeskTicketTools {
     }
     public static final long MAX_ATTACHMENT_SIZE_BYTES = 50L * 1024 * 1024; // 50MB
 
+    static final Set<String> SENSITIVE_ROOT_DIRS = Set.of(
+            "etc", "proc", "sys", "dev", "boot", "root", "windows", "winnt"
+    );
+
+    static final Set<String> SENSITIVE_DIR_NAMES = Set.of(
+            ".ssh", ".aws", ".gnupg", ".gpg", ".kube", ".docker", ".azure", ".git"
+    );
+
+    static final Set<String> SENSITIVE_EXACT_FILENAMES = Set.of(
+            "id_rsa", "id_rsa.pub",
+            "id_ed25519", "id_ed25519.pub",
+            "id_ecdsa", "id_ecdsa.pub",
+            "id_dsa", "id_dsa.pub",
+            "authorized_keys", "known_hosts",
+            ".bash_history", ".zsh_history", ".history", ".sh_history",
+            ".netrc", ".npmrc", ".git-credentials",
+            "credentials.json", "client_secret.json",
+            "passwd", "shadow", "master.passwd", "sudoers",
+            ".htpasswd"
+    );
+
+    static boolean isSensitiveFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return false;
+        }
+        String lower = filename.toLowerCase();
+        if (lower.equals(".env") || lower.startsWith(".env.")) {
+            return true;
+        }
+        if (SENSITIVE_EXACT_FILENAMES.contains(lower)) {
+            return true;
+        }
+        return lower.startsWith("id_") && (lower.endsWith(".pub") || !lower.contains("."));
+    }
+
+    static boolean isSensitiveSystemPath(Path path) {
+        if (path == null) {
+            return false;
+        }
+        Path normalized = path.toAbsolutePath().normalize();
+
+        // Check root-level directory or /private/etc, /private/var on macOS
+        if (normalized.getNameCount() > 0) {
+            String firstElement = normalized.getName(0).toString().toLowerCase();
+            if (SENSITIVE_ROOT_DIRS.contains(firstElement)) {
+                return true;
+            }
+            if (normalized.getNameCount() > 1 && "private".equals(firstElement)) {
+                String secondElement = normalized.getName(1).toString().toLowerCase();
+                if (SENSITIVE_ROOT_DIRS.contains(secondElement)) {
+                    return true;
+                }
+            }
+        }
+
+        // Check path elements for sensitive directory names
+        for (int i = 0; i < normalized.getNameCount(); i++) {
+            String element = normalized.getName(i).toString().toLowerCase();
+            if (SENSITIVE_DIR_NAMES.contains(element)) {
+                return true;
+            }
+        }
+
+        // Check the filename itself
+        Path fileName = normalized.getFileName();
+        if (fileName != null && isSensitiveFilename(fileName.toString())) {
+            return true;
+        }
+
+        return false;
+    }
+
     static final Map<String, String> EXTENSION_MIME_TYPES = Map.ofEntries(
             Map.entry("txt", "text/plain"),
             Map.entry("log", "text/plain"),
@@ -908,6 +981,9 @@ public class ZendeskTicketTools {
             expanded = System.getProperty("user.home") + expanded.substring(1);
         }
         Path path = Path.of(expanded).toAbsolutePath().normalize();
+        if (isSensitiveSystemPath(path)) {
+            throw new IllegalArgumentException("Access denied: Uploading sensitive system or credential files is prohibited: " + filePath);
+        }
         if (!Files.exists(path)) {
             throw new IllegalArgumentException("File not found at path: " + filePath);
         }
@@ -920,8 +996,17 @@ public class ZendeskTicketTools {
         if (!Files.isReadable(path)) {
             throw new IllegalArgumentException("File is not readable (check permissions): " + filePath);
         }
+        Path realPath;
         try {
-            long size = Files.size(path);
+            realPath = path.toRealPath();
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to resolve real path for " + filePath + ": " + e.getMessage(), e);
+        }
+        if (isSensitiveSystemPath(realPath)) {
+            throw new IllegalArgumentException("Access denied: Uploading sensitive system or credential files is prohibited: " + filePath);
+        }
+        try {
+            long size = Files.size(realPath);
             if (size == 0) {
                 throw new IllegalArgumentException("Cannot upload empty file (0 bytes): " + filePath);
             }
