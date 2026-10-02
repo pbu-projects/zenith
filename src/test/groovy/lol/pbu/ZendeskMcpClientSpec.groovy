@@ -131,8 +131,15 @@ class ZendeskMcpClientSpec extends Specification {
                 "getTicketForm",
                 "listCustomObjects",
                 "getCustomObject",
+                "createCustomObject",
+                "updateCustomObject",
+                "deleteCustomObject",
+                "getCustomObjectLimits",
                 "listCustomObjectRecords",
                 "getCustomObjectRecord",
+                "createCustomObjectRecord",
+                "updateCustomObjectRecord",
+                "deleteCustomObjectRecord",
                 "searchCustomObjectRecords",
                 "uploadAttachment",
                 "batchUpdateTickets",
@@ -228,6 +235,17 @@ class ZendeskMcpClientSpec extends Specification {
         def result = mcpClient.callTool(new McpSchema.CallToolRequest("listCustomObjects", [:]))
 
         then: "custom objects are returned over the MCP protocol"
+        result != null
+        !Boolean.TRUE.equals(result.isError())
+        result.content() != null
+        !result.content().isEmpty()
+    }
+
+    def "8b. MCP Client invokes getCustomObjectLimits tool over STDIO protocol"() {
+        when: "client invokes getCustomObjectLimits tool"
+        def result = mcpClient.callTool(new McpSchema.CallToolRequest("getCustomObjectLimits", [:]))
+
+        then: "custom object limits are returned over the MCP protocol"
         result != null
         !Boolean.TRUE.equals(result.isError())
         result.content() != null

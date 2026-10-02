@@ -1,9 +1,11 @@
 package lol.pbu.tools
 
+import io.micronaut.core.io.buffer.ByteArrayBufferFactory
 import io.micronaut.http.HttpResponse
 import io.micronaut.http.HttpStatus
 import io.micronaut.http.client.exceptions.HttpClientResponseException
 import io.micronaut.serde.ObjectMapper
+import java.nio.charset.StandardCharsets
 import spock.lang.Specification
 
 class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
@@ -316,6 +318,63 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
         then:
         mcpError.jsonRpcError.code == -32603
         mcpError.message.contains("Cyclic network error")
+    }
+
+    def "extracts error diagnosis from ByteBuffer raw response body"() {
+        given:
+        byte[] bytes = '{"error":"InvalidData","description":"ByteBuffer payload error"}'.getBytes(StandardCharsets.UTF_8)
+        def buffer = ByteArrayBufferFactory.INSTANCE.wrap(bytes)
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(buffer)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("InvalidData - ByteBuffer payload error")
+    }
+
+    def "formats structured error diagnosis when error field is a JSON object"() {
+        given:
+        def json = '{"error":{"title":"InvalidAttribute","message":"Record validation errors","details":{"requester":[{"description":"Requester 382716491823 is not a valid user"}]}}}'
+        def response = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY).body(json)
+        def ex = new HttpClientResponseException("Unprocessable Entity", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("InvalidAttribute - Record validation errors: requester: Requester 382716491823 is not a valid user")
+    }
+
+    def "formats structured error diagnosis when errors field is an array of objects"() {
+        given:
+        def json = '{"errors":[{"title":"InvalidAttribute","message":"Requester is invalid"}]}'
+        def response = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY).body(json)
+        def ex = new HttpClientResponseException("Unprocessable Entity", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("InvalidAttribute: Requester is invalid")
+    }
+
+    def "formats structured error diagnosis when root is an array of error messages"() {
+        given:
+        def json = '["Custom status 1000000000002 not found", "Requester ID invalid"]'
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(json)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("Custom status 1000000000002 not found; Requester ID invalid")
     }
 }
 

@@ -29,6 +29,8 @@ public final class ToolValidationSupport {
                     hint = "The only valid parameter for getTicketAudits is 'ticketId'.";
                 } else if ("createTicket".equals(toolName)) {
                     hint = "If you meant to set a custom field, use the 'customFields' array parameter.";
+                } else if (toolName != null && toolName.contains("CustomObject")) {
+                    hint = "Check the tool documentation for valid parameters.";
                 } else {
                     hint = "If you meant to update a custom field, use the 'customFields' array parameter.";
                 }
@@ -53,9 +55,6 @@ public final class ToolValidationSupport {
         }
         if (customStatusId <= 0) {
             throw new IllegalArgumentException("customStatusId must be a positive integer, got: " + customStatusId);
-        }
-        if (customStatusId > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("customStatusId " + customStatusId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits custom_status_id on ticket inputs to 32-bit integers.");
         }
     }
 

@@ -1,6 +1,7 @@
 package lol.pbu.tools;
 
 import io.micronaut.core.annotation.Order;
+import io.micronaut.core.io.buffer.ByteBuffer;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.json.tree.JsonNode;
@@ -178,16 +179,21 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     }
 
     private String resolveResponseBody(HttpResponse<?> response) {
+        Object rawBody = response.body();
+        if (rawBody instanceof ByteBuffer<?> buf) {
+            return buf.toString(StandardCharsets.UTF_8).trim();
+        } else if (rawBody instanceof byte[] bytes) {
+            return new String(bytes, StandardCharsets.UTF_8).trim();
+        } else if (rawBody instanceof CharSequence cs) {
+            return cs.toString().trim();
+        } else if (rawBody instanceof JsonNode jn) {
+            return jn.toString().trim();
+        }
         Optional<String> bodyOpt = response.getBody(String.class);
         if (bodyOpt.isPresent()) {
             return bodyOpt.get().trim();
         }
-        Object rawBody = response.body();
-        if (rawBody instanceof byte[] bytes) {
-            return new String(bytes, StandardCharsets.UTF_8).trim();
-        } else if (rawBody instanceof CharSequence cs) {
-            return cs.toString().trim();
-        } else if (rawBody != null) {
+        if (rawBody != null) {
             try {
                 return objectMapper.writeValueAsString(rawBody).trim();
             } catch (Exception _) {
@@ -200,15 +206,46 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     private String parseJsonDiagnostic(String body) {
         try {
             JsonNode rootNode = objectMapper.readValue(body, JsonNode.class);
-            if (rootNode == null || !rootNode.isObject()) {
+            if (rootNode == null || (!rootNode.isObject() && !rootNode.isArray())) {
                 return null;
             }
-            StringBuilder sb = new StringBuilder();
-            String error = readTextValue(rootNode.get("error"));
-            if (error != null) {
-                sb.append(error);
+            if (rootNode.isArray()) {
+                return formatArrayErrors(rootNode);
             }
-            appendDiagnosticMessage(sb, error, rootNode.get(KEY_DESCRIPTION), rootNode.get("message"));
+            StringBuilder sb = new StringBuilder();
+
+            JsonNode errorNode = rootNode.get("error");
+            if (errorNode != null && !errorNode.isNull()) {
+                if (errorNode.isObject()) {
+                    String title = readTextValue(errorNode.get("title"));
+                    String msg = readTextValue(errorNode.get("message"));
+                    String desc = readTextValue(errorNode.get(KEY_DESCRIPTION));
+                    if (title != null) {
+                        sb.append(title);
+                    }
+                    appendDiagnosticMessage(sb, title, desc != null ? errorNode.get(KEY_DESCRIPTION) : null, msg != null ? errorNode.get("message") : null);
+                    JsonNode errDetails = errorNode.get("details");
+                    if (errDetails != null && !errDetails.isNull()) {
+                        appendWithSeparator(sb, ": ", formatDetails(errDetails));
+                    }
+                } else {
+                    String error = readTextValue(errorNode);
+                    if (error != null) {
+                        sb.append(error);
+                    }
+                }
+            }
+
+            JsonNode errorsNode = rootNode.get("errors");
+            if (errorsNode != null && !errorsNode.isNull()) {
+                String formattedErrors = errorsNode.isArray() ? formatArrayErrors(errorsNode) : formatDetails(errorsNode);
+                if (formattedErrors != null && !formattedErrors.isBlank()) {
+                    appendWithSeparator(sb, " - ", formattedErrors);
+                }
+            }
+
+            String currentError = !sb.isEmpty() ? sb.toString() : null;
+            appendDiagnosticMessage(sb, currentError, rootNode.get(KEY_DESCRIPTION), rootNode.get("message"));
 
             JsonNode detailsNode = rootNode.get("details");
             if (detailsNode != null && !detailsNode.isNull()) {
@@ -219,6 +256,44 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             log.debug("Could not parse Zendesk error response body as JSON: {}", parseEx.getMessage());
             return null;
         }
+    }
+
+    private String formatArrayErrors(JsonNode arrayNode) {
+        List<String> items = new ArrayList<>();
+        for (JsonNode item : arrayNode.values()) {
+            if (item == null || item.isNull()) continue;
+            if (item.isObject()) {
+                StringBuilder itemSb = new StringBuilder();
+                String title = readTextValue(item.get("title"));
+                String code = readTextValue(item.get("code"));
+                String err = readTextValue(item.get("error"));
+                String header = title != null ? title : (code != null ? code : err);
+                if (header != null) {
+                    itemSb.append(header);
+                }
+
+                String desc = readTextValue(item.get(KEY_DESCRIPTION));
+                String msg = readTextValue(item.get("message"));
+                String detail = desc != null ? desc : msg;
+                if (detail != null && !detail.equals(header)) {
+                    appendWithSeparator(itemSb, ": ", detail);
+                }
+
+                JsonNode itemDetails = item.get("details");
+                if (itemDetails != null && !itemDetails.isNull()) {
+                    appendWithSeparator(itemSb, " - ", formatDetails(itemDetails));
+                }
+                if (!itemSb.isEmpty()) {
+                    items.add(itemSb.toString());
+                }
+            } else {
+                String text = item.coerceStringValue();
+                if (text != null && !text.isBlank()) {
+                    items.add(text);
+                }
+            }
+        }
+        return String.join("; ", items);
     }
 
     private void appendDiagnosticMessage(StringBuilder sb, String error, JsonNode descNode, JsonNode msgNode) {

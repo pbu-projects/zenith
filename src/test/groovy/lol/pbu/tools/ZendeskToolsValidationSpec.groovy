@@ -7,6 +7,15 @@ import lol.pbu.z4j.client.AttachmentClient
 import lol.pbu.z4j.client.CategoryClient
 import lol.pbu.z4j.client.CustomObjectRecordsClient
 import lol.pbu.z4j.client.CustomObjectsClient
+import lol.pbu.z4j.model.CustomObject
+import lol.pbu.z4j.model.CustomObjectLimitsResponse
+import lol.pbu.z4j.model.CustomObjectRecord
+import lol.pbu.z4j.model.CustomObjectRecordResponse
+import lol.pbu.z4j.model.CustomObjectRecordsCreateRequest
+import lol.pbu.z4j.model.CustomObjectRecordsResponse
+import lol.pbu.z4j.model.CustomObjectResponse
+import lol.pbu.z4j.model.CustomObjectsCreateRequest
+import lol.pbu.z4j.model.CustomObjectsResponse
 import lol.pbu.z4j.client.JobStatusClient
 import lol.pbu.z4j.client.PostClient
 import lol.pbu.z4j.client.SearchClient
@@ -814,34 +823,69 @@ class ZendeskToolsValidationSpec extends Specification {
         e.message.toLowerCase().contains("task")
     }
 
-    def "requesterId exceeding 32-bit integer range throws IllegalArgumentException across tools"() {
+    def "requesterId supports 64-bit integer range across tools"() {
+        given:
+        TicketCreateRequest capturedCreate = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedCreate = req
+            return reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+        TicketUpdateRequest capturedUpdate = null
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedUpdate = req
+            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        }
+        TicketUpdateRequest capturedBatch = null
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            capturedBatch = req
+            return reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+                jobStatus = new JobStatus().tap { id = "bulk-job-1" }
+            })
+        }
+
         when: "createTicket with 64-bit requesterId"
         tools.createTicket("Subject", "Comment", true, null, null, null, null, null, 382716491823L, null, null)
 
         then:
-        def e1 = thrown(IllegalArgumentException)
-        e1.message.contains("exceeds 32-bit integer range")
+        capturedCreate != null
+        (capturedCreate.ticket.requesterId as Long) == 382716491823L
 
         when: "updateTicket with 64-bit requesterId"
         tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, 382716491823L, null, null)
 
         then:
-        def e2 = thrown(IllegalArgumentException)
-        e2.message.contains("exceeds 32-bit integer range")
+        capturedUpdate != null
+        (capturedUpdate.ticket.requesterId as Long) == 382716491823L
 
         when: "batchUpdateTickets with 64-bit requesterId (concurrent)"
         tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, null, null, null, 382716491823L, null, null)
 
         then:
-        def e3 = thrown(IllegalArgumentException)
-        e3.message.contains("exceeds 32-bit integer range")
+        capturedUpdate != null
+        (capturedUpdate.ticket.requesterId as Long) == 382716491823L
 
         when: "batchUpdateTickets with 64-bit requesterId (asyncBulk)"
         tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, null, null, null, 382716491823L, null, null)
 
         then:
-        def e4 = thrown(IllegalArgumentException)
-        e4.message.contains("exceeds 32-bit integer range")
+        capturedBatch != null
+        (capturedBatch.ticket.requesterId as Long) == 382716491823L
+    }
+
+    def "requesterId throws IllegalArgumentException when non-positive"() {
+        when: "createTicket with non-positive requesterId"
+        tools.createTicket("Subject", "Comment", true, null, null, null, null, null, 0L, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("requesterId must be a positive integer, got: 0")
+
+        when: "updateTicket with non-positive requesterId"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, -5L, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("requesterId must be a positive integer, got: -5")
     }
 
     def "createTicket validates comment and description parameters"() {
@@ -1094,20 +1138,28 @@ class ZendeskToolsValidationSpec extends Specification {
         e2.message.contains("could not be retrieved")
     }
 
-    def "validateProblemTarget throws when problemId exceeds 32-bit integer range"() {
+    def "validateProblemTarget allows problemId exceeding 32-bit integer range"() {
+        given:
+        Long bigProblemId = ((Long) Integer.MAX_VALUE) + 1L
+        ticketClient.showTicket(bigProblemId) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket().tap {
+                id = bigProblemId
+                type = TicketType.PROBLEM
+            }
+        })
+        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+            ticket = new Ticket().tap {
+                id = 100L
+                type = TicketType.INCIDENT
+            }
+        })
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+
         when: "problemId exceeds Integer.MAX_VALUE in updateTicket"
-        tools.updateTicket(100L, null, null, null, null, null, null, ((Long) Integer.MAX_VALUE) + 1L, true, null, null, null, null)
+        tools.updateTicket(100L, null, null, null, null, null, null, bigProblemId, true, null, null, null, null)
 
         then:
-        def e1 = thrown(IllegalArgumentException)
-        e1.message.contains("exceeds 32-bit integer range")
-
-        when: "problemId exceeds Integer.MAX_VALUE in batchUpdateTickets"
-        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, ((Long) Integer.MAX_VALUE) + 1L, true, null, null, null, null)
-
-        then:
-        def e2 = thrown(IllegalArgumentException)
-        e2.message.contains("exceeds 32-bit integer range")
+        notThrown(IllegalArgumentException)
     }
 
     def "validateProblemTarget throws when problemId is non-positive"() {
@@ -1644,7 +1696,7 @@ class ZendeskToolsValidationSpec extends Specification {
         e2.message.contains("101: 'Open - In Progress'")
     }
 
-    def "updateTicket throws error on invalid customStatusId bounds"() {
+    def "updateTicket throws error on invalid customStatusId bounds and allows 64-bit customStatusId"() {
         when: "customStatusId is <= 0"
         tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, 0L, null)
 
@@ -1653,11 +1705,11 @@ class ZendeskToolsValidationSpec extends Specification {
         e1.message.contains("customStatusId must be a positive integer, got: 0")
 
         when: "customStatusId exceeds 32-bit Integer range"
-        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, ((Long) Integer.MAX_VALUE) + 1L, null)
+        Long bigStatusId = 1000000000002L
+        ToolValidationSupport.validateCustomStatusBounds(bigStatusId)
 
-        then:
-        def e2 = thrown(IllegalArgumentException)
-        e2.message.contains("exceeds 32-bit integer range")
+        then: "bounds check passes without throwing 32-bit exception"
+        notThrown(IllegalArgumentException)
     }
 
     def "batchUpdateTickets updates tickets with customStatusId in concurrent and bulk modes"() {
@@ -2450,6 +2502,260 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         resp2 != null
+    }
+
+    def "createTicket sets customStatusId on TicketCreateInput when status is omitted"() {
+        given:
+        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new TicketResponse())
+        }
+
+        when: "customStatusId 101 has category 'open' and status is omitted"
+        tools.createTicket("New Ticket", "Initial comment", true, "normal", null, null, null, null, null, null, 101L, null)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.status == null
+        capturedReq.ticket.customStatusId == 101
+    }
+
+    def "createCustomObject creates custom object and validates required parameters"() {
+        given:
+        CustomObjectsCreateRequest capturedReq = null
+        customObjectsClient.createCustomObject(_ as CustomObjectsCreateRequest) >> { CustomObjectsCreateRequest req ->
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new CustomObjectResponse().tap {
+                customObject = req.customObject
+            })
+        }
+
+        when: "missing key"
+        tools.createCustomObject(null, "Car", "Cars", "Description", null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("key is required")
+
+        when: "missing title"
+        tools.createCustomObject("car", null, "Cars", "Description", null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("title is required")
+
+        when: "missing titlePluralized"
+        tools.createCustomObject("car", "Car", null, "Description", null, null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("titlePluralized is required")
+
+        when: "valid creation with flattened parameters"
+        def resp = tools.createCustomObject("car", "Car", "Cars", "Fleet cars", null, null)
+
+        then:
+        resp != null
+        capturedReq != null
+        capturedReq.customObject.key == "car"
+        capturedReq.customObject.title == "Car"
+        capturedReq.customObject.titlePluralized == "Cars"
+        capturedReq.customObject.description == "Fleet cars"
+
+        when: "valid creation via nested map payload"
+        tools.createCustomObject(null, null, null, null, [key: "device", title: "Device", title_pluralized: "Devices"], null)
+
+        then:
+        capturedReq != null
+        capturedReq.customObject.key == "device"
+        capturedReq.customObject.title == "Device"
+        capturedReq.customObject.titlePluralized == "Devices"
+    }
+
+    def "updateCustomObject updates custom object definition"() {
+        given:
+        String capturedKey = null
+        CustomObjectsCreateRequest capturedReq = null
+        customObjectsClient.updateCustomObject(_ as String, _ as CustomObjectsCreateRequest) >> { String key, CustomObjectsCreateRequest req ->
+            capturedKey = key
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new CustomObjectResponse().tap {
+                customObject = req.customObject
+            })
+        }
+
+        when: "missing customObjectKey"
+        tools.updateCustomObject(null, "Vehicle", "Vehicles", null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "valid update"
+        def resp = tools.updateCustomObject("car", "Vehicle", "Vehicles", "Updated desc", null, null)
+
+        then:
+        resp != null
+        capturedKey == "car"
+        capturedReq != null
+        capturedReq.customObject.title == "Vehicle"
+        capturedReq.customObject.titlePluralized == "Vehicles"
+        capturedReq.customObject.description == "Updated desc"
+    }
+
+    def "deleteCustomObject deletes custom object and returns confirmation map"() {
+        given:
+        String capturedKey = null
+        customObjectsClient.deleteCustomObject(_ as String) >> { String key ->
+            capturedKey = key
+            return reactor.core.publisher.Mono.empty()
+        }
+
+        when: "missing key"
+        tools.deleteCustomObject(null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "valid deletion"
+        def res = tools.deleteCustomObject("car")
+
+        then:
+        capturedKey == "car"
+        res.success == true
+        res.deletedCustomObjectKey == "car"
+    }
+
+    def "getCustomObjectLimits returns limits from client"() {
+        given:
+        customObjectsClient.customObjectsLimit() >> reactor.core.publisher.Mono.just(new CustomObjectLimitsResponse())
+
+        when:
+        def limits = tools.getCustomObjectLimits()
+
+        then:
+        limits != null
+    }
+
+    def "createCustomObjectRecord creates record and validates required customObjectKey"() {
+        given:
+        String capturedKey = null
+        CustomObjectRecordsCreateRequest capturedReq = null
+        customObjectRecordsClient.createCustomObjectRecord(_ as String, _ as CustomObjectRecordsCreateRequest) >> { String key, CustomObjectRecordsCreateRequest req ->
+            capturedKey = key
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new CustomObjectRecordResponse().tap {
+                customObjectRecord = req.customObjectRecord
+            })
+        }
+
+        when: "missing customObjectKey"
+        tools.createCustomObjectRecord(null, "Car #1", [color: "red"], "ext_1", null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "valid creation"
+        def resp = tools.createCustomObjectRecord("car", "Car #1", [color: "blue", year: 2025], "ext_123", null, null)
+
+        then:
+        resp != null
+        capturedKey == "car"
+        capturedReq != null
+        capturedReq.customObjectRecord.name == "Car #1"
+        capturedReq.customObjectRecord.customObjectFields == [color: "blue", year: 2025]
+        capturedReq.customObjectRecord.externalId == "ext_123"
+    }
+
+    def "updateCustomObjectRecord updates record fields and externalId"() {
+        given:
+        String capturedKey = null
+        String capturedId = null
+        CustomObjectRecordsCreateRequest capturedReq = null
+        customObjectRecordsClient.updateCustomObjectRecord(_ as String, _ as String, _ as CustomObjectRecordsCreateRequest) >> { String key, String id, CustomObjectRecordsCreateRequest req ->
+            capturedKey = key
+            capturedId = id
+            capturedReq = req
+            return reactor.core.publisher.Mono.just(new CustomObjectRecordResponse().tap {
+                customObjectRecord = req.customObjectRecord
+            })
+        }
+
+        when: "missing key or recordId"
+        tools.updateCustomObjectRecord(null, "rec_1", "Updated", null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "missing recordId"
+        tools.updateCustomObjectRecord("car", null, "Updated", null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("recordId is required")
+
+        when: "valid update"
+        def resp = tools.updateCustomObjectRecord("car", "rec_99", "Updated Car", [mileage: 15000], "ext_999", null, null)
+
+        then:
+        resp != null
+        capturedKey == "car"
+        capturedId == "rec_99"
+        capturedReq != null
+        capturedReq.customObjectRecord.name == "Updated Car"
+        capturedReq.customObjectRecord.customObjectFields == [mileage: 15000]
+        capturedReq.customObjectRecord.externalId == "ext_999"
+    }
+
+    def "deleteCustomObjectRecord deletes record and returns confirmation map"() {
+        given:
+        String capturedKey = null
+        String capturedId = null
+        customObjectRecordsClient.deleteCustomObjectRecord(_ as String, _ as String) >> { String key, String id ->
+            capturedKey = key
+            capturedId = id
+            return reactor.core.publisher.Mono.empty()
+        }
+
+        when: "missing recordId"
+        tools.deleteCustomObjectRecord("car", null, null)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("recordId is required")
+
+        when: "valid delete"
+        def res = tools.deleteCustomObjectRecord("car", "rec_456")
+
+        then:
+        capturedKey == "car"
+        capturedId == "rec_456"
+        res.success == true
+        res.customObjectKey == "car"
+        res.deletedRecordId == "rec_456"
+    }
+
+    def "custom object tools reject unrecognized parameters"() {
+        when: "createCustomObject has unknown parameter"
+        def badReq = new CallToolRequest("createCustomObject", [key: "car", title: "Car", titlePluralized: "Cars", unknownParam: "bad"])
+        tools.createCustomObject("car", "Car", "Cars", null, null, badReq)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Unrecognized parameter: 'unknownParam'")
+
+        when: "createCustomObjectRecord has unknown parameter"
+        def badReq2 = new CallToolRequest("createCustomObjectRecord", [customObjectKey: "car", name: "Car 1", unknownParam: "bad"])
+        tools.createCustomObjectRecord("car", "Car 1", null, null, null, badReq2)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Unrecognized parameter: 'unknownParam'")
     }
 }
 
