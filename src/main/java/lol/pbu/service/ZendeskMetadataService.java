@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
@@ -65,10 +64,6 @@ public class ZendeskMetadataService {
     private final AtomicReference<CacheEntry<List<TicketFieldCustomStatusObject>>> customStatusesCache = new AtomicReference<>();
     private final AtomicReference<CacheEntry<List<TicketFormStatus>>> ticketFormStatusesCache = new AtomicReference<>();
     private final AtomicReference<CacheEntry<List<TicketForm>>> ticketFormsCache = new AtomicReference<>();
-
-    private final ReentrantLock customStatusLock = new ReentrantLock();
-    private final ReentrantLock ticketFormStatusLock = new ReentrantLock();
-    private final ReentrantLock ticketFormLock = new ReentrantLock();
 
     private record CacheEntry<T>(T data, long expiresAtMs) {
         boolean isExpired(long now) {
@@ -99,136 +94,151 @@ public class ZendeskMetadataService {
         clearTicketFormCache();
     }
 
-    public List<TicketFieldCustomStatusObject> getCachedCustomStatuses(boolean forceRefresh) {
+    public Mono<List<TicketFieldCustomStatusObject>> getCustomStatuses(boolean forceRefresh) {
         if (customStatusClient == null) {
-            return Collections.emptyList();
+            return Mono.just(Collections.emptyList());
         }
         long now = System.currentTimeMillis();
         CacheEntry<List<TicketFieldCustomStatusObject>> current = customStatusesCache.get();
         if (isCacheValid(current, forceRefresh, now)) {
-            return current.data();
+            return Mono.just(current.data());
         }
 
-        customStatusLock.lock();
-        try {
-            now = System.currentTimeMillis();
-            current = customStatusesCache.get();
-            if (isCacheValid(current, forceRefresh, now)) {
-                return current.data();
-            }
-
-            try {
-                CustomStatusesResponse resp = awaitResponse(customStatusClient.listCustomStatuses(null, null));
-                if (resp != null && resp.customStatuses() != null) {
-                    List<TicketFieldCustomStatusObject> list = Collections.unmodifiableList(new ArrayList<>(resp.customStatuses()));
-                    customStatusesCache.set(new CacheEntry<>(list, now + CUSTOM_STATUS_CACHE_TTL_MS));
-                    log.debug("Refreshed custom status cache with {} statuses (TTL: {}ms)", list.size(), CUSTOM_STATUS_CACHE_TTL_MS);
-                    return list;
-                }
-                List<TicketFieldCustomStatusObject> empty = Collections.emptyList();
-                customStatusesCache.set(new CacheEntry<>(empty, 0L));
-                return empty;
-            } catch (Exception e) {
-                Throwable cause = unwrapCause(e);
-                log.warn("Failed to fetch custom statuses from Zendesk: {}", cause.getMessage());
-                if (hasStaleData(current)) {
-                    log.info("Using stale custom status cache due to fetch error");
-                    return current.data();
-                }
-                throw new IllegalArgumentException("Failed to fetch custom statuses from Zendesk: " + cause.getMessage(), cause);
-            }
-        } finally {
-            customStatusLock.unlock();
+        Mono<CustomStatusesResponse> clientMono = customStatusClient.listCustomStatuses(null, null);
+        if (clientMono == null) {
+            return Mono.just(Collections.emptyList());
         }
+
+        return clientMono
+                .map(resp -> {
+                    if (resp != null && resp.customStatuses() != null) {
+                        List<TicketFieldCustomStatusObject> list = Collections.unmodifiableList(new ArrayList<>(resp.customStatuses()));
+                        customStatusesCache.set(new CacheEntry<>(list, System.currentTimeMillis() + CUSTOM_STATUS_CACHE_TTL_MS));
+                        log.debug("Refreshed custom status cache with {} statuses (TTL: {}ms)", list.size(), CUSTOM_STATUS_CACHE_TTL_MS);
+                        return list;
+                    }
+                    List<TicketFieldCustomStatusObject> empty = Collections.emptyList();
+                    customStatusesCache.set(new CacheEntry<>(empty, 0L));
+                    return empty;
+                })
+                .defaultIfEmpty(Collections.emptyList())
+                .onErrorResume(e -> {
+                    Throwable cause = unwrapCause(e);
+                    log.warn("Failed to fetch custom statuses from Zendesk: {}", cause.getMessage());
+                    CacheEntry<List<TicketFieldCustomStatusObject>> fallback = customStatusesCache.get();
+                    if (hasStaleData(fallback)) {
+                        log.info("Using stale custom status cache due to fetch error");
+                        return Mono.just(fallback.data());
+                    }
+                    return Mono.error(new IllegalArgumentException("Failed to fetch custom statuses from Zendesk: " + cause.getMessage(), cause));
+                });
     }
 
-    public List<TicketFormStatus> getCachedTicketFormStatuses(boolean forceRefresh) {
+    public List<TicketFieldCustomStatusObject> getCachedCustomStatuses(boolean forceRefresh) {
+        return awaitResponse(getCustomStatuses(forceRefresh));
+    }
+
+    public Mono<List<TicketFormStatus>> getTicketFormStatuses(boolean forceRefresh) {
         if (customStatusClient == null) {
-            return Collections.emptyList();
+            return Mono.just(Collections.emptyList());
         }
         long now = System.currentTimeMillis();
         CacheEntry<List<TicketFormStatus>> current = ticketFormStatusesCache.get();
         if (isCacheValid(current, forceRefresh, now)) {
-            return current.data();
+            return Mono.just(current.data());
         }
 
-        ticketFormStatusLock.lock();
-        try {
-            now = System.currentTimeMillis();
-            current = ticketFormStatusesCache.get();
-            if (isCacheValid(current, forceRefresh, now)) {
-                return current.data();
-            }
-
-            try {
-                TicketFormStatusesResponse resp = awaitResponse(customStatusClient.listTicketFormStatuses(null));
-                if (resp != null && resp.ticketFormStatuses() != null) {
-                    List<TicketFormStatus> list = Collections.unmodifiableList(new ArrayList<>(resp.ticketFormStatuses()));
-                    ticketFormStatusesCache.set(new CacheEntry<>(list, now + CUSTOM_STATUS_CACHE_TTL_MS));
-                    log.debug("Refreshed ticket form status cache with {} mappings (TTL: {}ms)", list.size(), CUSTOM_STATUS_CACHE_TTL_MS);
-                    return list;
-                }
-                List<TicketFormStatus> empty = Collections.emptyList();
-                ticketFormStatusesCache.set(new CacheEntry<>(empty, 0L));
-                return empty;
-            } catch (Exception e) {
-                Throwable cause = unwrapCause(e);
-                log.warn("Failed to fetch ticket form statuses from Zendesk: {}", cause.getMessage());
-                if (hasStaleData(current)) {
-                    log.info("Using stale ticket form status cache due to fetch error");
-                    return current.data();
-                }
-                List<TicketFormStatus> empty = Collections.emptyList();
-                ticketFormStatusesCache.set(new CacheEntry<>(empty, 0L));
-                return empty;
-            }
-        } finally {
-            ticketFormStatusLock.unlock();
+        Mono<TicketFormStatusesResponse> clientMono = customStatusClient.listTicketFormStatuses(null);
+        if (clientMono == null) {
+            return Mono.just(Collections.emptyList());
         }
+
+        return clientMono
+                .map(resp -> {
+                    if (resp != null && resp.ticketFormStatuses() != null) {
+                        List<TicketFormStatus> list = Collections.unmodifiableList(new ArrayList<>(resp.ticketFormStatuses()));
+                        ticketFormStatusesCache.set(new CacheEntry<>(list, System.currentTimeMillis() + CUSTOM_STATUS_CACHE_TTL_MS));
+                        log.debug("Refreshed ticket form status cache with {} mappings (TTL: {}ms)", list.size(), CUSTOM_STATUS_CACHE_TTL_MS);
+                        return list;
+                    }
+                    List<TicketFormStatus> empty = Collections.emptyList();
+                    ticketFormStatusesCache.set(new CacheEntry<>(empty, 0L));
+                    return empty;
+                })
+                .defaultIfEmpty(Collections.emptyList())
+                .onErrorResume(e -> {
+                    Throwable cause = unwrapCause(e);
+                    log.warn("Failed to fetch ticket form statuses from Zendesk: {}", cause.getMessage());
+                    CacheEntry<List<TicketFormStatus>> fallback = ticketFormStatusesCache.get();
+                    if (hasStaleData(fallback)) {
+                        log.info("Using stale ticket form status cache due to fetch error");
+                        return Mono.just(fallback.data());
+                    }
+                    List<TicketFormStatus> empty = Collections.emptyList();
+                    ticketFormStatusesCache.set(new CacheEntry<>(empty, 0L));
+                    return Mono.just(empty);
+                });
     }
 
-    public List<TicketForm> getCachedTicketForms(boolean forceRefresh) {
+    public List<TicketFormStatus> getCachedTicketFormStatuses(boolean forceRefresh) {
+        return awaitResponse(getTicketFormStatuses(forceRefresh));
+    }
+
+    public Mono<List<TicketForm>> getTicketForms(boolean forceRefresh) {
         if (ticketFormsClient == null) {
-            return Collections.emptyList();
+            return Mono.just(Collections.emptyList());
         }
         long now = System.currentTimeMillis();
         CacheEntry<List<TicketForm>> current = ticketFormsCache.get();
         if (isCacheValid(current, forceRefresh, now)) {
-            return current.data();
+            return Mono.just(current.data());
         }
 
-        ticketFormLock.lock();
-        try {
-            now = System.currentTimeMillis();
-            current = ticketFormsCache.get();
-            if (isCacheValid(current, forceRefresh, now)) {
-                return current.data();
-            }
+        Mono<TicketFormsResponse> clientMono = ticketFormsClient.listTicketForms();
+        if (clientMono == null) {
+            return Mono.just(Collections.emptyList());
+        }
 
-            try {
-                TicketFormsResponse resp = awaitResponse(ticketFormsClient.listTicketForms());
-                if (resp != null && resp.getTicketForms() != null) {
-                    List<TicketForm> list = Collections.unmodifiableList(new ArrayList<>(resp.getTicketForms()));
-                    ticketFormsCache.set(new CacheEntry<>(list, now + TICKET_FORM_CACHE_TTL_MS));
-                    log.debug("Refreshed ticket form cache with {} forms (TTL: {}ms)", list.size(), TICKET_FORM_CACHE_TTL_MS);
-                    return list;
-                }
-                List<TicketForm> empty = Collections.emptyList();
-                ticketFormsCache.set(new CacheEntry<>(empty, 0L));
-                return empty;
-            } catch (Exception e) {
-                Throwable cause = unwrapCause(e);
-                log.warn("Failed to fetch ticket forms from Zendesk: {}", cause.getMessage());
-                if (hasStaleData(current)) {
-                    log.info("Using stale ticket form cache due to fetch error");
-                    return current.data();
-                }
-                List<TicketForm> empty = Collections.emptyList();
-                ticketFormsCache.set(new CacheEntry<>(empty, 0L));
-                return empty;
+        return clientMono
+                .map(resp -> {
+                    if (resp != null && resp.getTicketForms() != null) {
+                        List<TicketForm> list = Collections.unmodifiableList(new ArrayList<>(resp.getTicketForms()));
+                        ticketFormsCache.set(new CacheEntry<>(list, System.currentTimeMillis() + TICKET_FORM_CACHE_TTL_MS));
+                        log.debug("Refreshed ticket form cache with {} forms (TTL: {}ms)", list.size(), TICKET_FORM_CACHE_TTL_MS);
+                        return list;
+                    }
+                    List<TicketForm> empty = Collections.emptyList();
+                    ticketFormsCache.set(new CacheEntry<>(empty, 0L));
+                    return empty;
+                })
+                .defaultIfEmpty(Collections.emptyList())
+                .onErrorResume(e -> {
+                    Throwable cause = unwrapCause(e);
+                    log.warn("Failed to fetch ticket forms from Zendesk: {}", cause.getMessage());
+                    CacheEntry<List<TicketForm>> fallback = ticketFormsCache.get();
+                    if (hasStaleData(fallback)) {
+                        log.info("Using stale ticket form cache due to fetch error");
+                        return Mono.just(fallback.data());
+                    }
+                    List<TicketForm> empty = Collections.emptyList();
+                    ticketFormsCache.set(new CacheEntry<>(empty, 0L));
+                    return Mono.just(empty);
+                });
+    }
+
+    public List<TicketForm> getCachedTicketForms(boolean forceRefresh) {
+        return awaitResponse(getTicketForms(forceRefresh));
+    }
+
+    private static <T> List<T> awaitResponse(Mono<List<T>> mono) {
+        try {
+            List<T> result = mono.subscribeOn(Schedulers.boundedElastic()).toFuture().join();
+            return result != null ? result : Collections.emptyList();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof RuntimeException re) {
+                throw re;
             }
-        } finally {
-            ticketFormLock.unlock();
+            throw e;
         }
     }
 
@@ -240,12 +250,7 @@ public class ZendeskMetadataService {
         return current != null && current.data() != null && !current.data().isEmpty();
     }
 
-    @Nullable
-    private static <T> T awaitResponse(@Nullable Mono<T> mono) {
-        return mono != null ? mono.subscribeOn(Schedulers.boundedElastic()).toFuture().join() : null;
-    }
-
-    private static Throwable unwrapCause(Exception e) {
+    private static Throwable unwrapCause(Throwable e) {
         return (e instanceof CompletionException && e.getCause() != null) ? e.getCause() : e;
     }
 

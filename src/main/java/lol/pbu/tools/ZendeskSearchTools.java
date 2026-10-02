@@ -7,11 +7,17 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lol.pbu.z4j.client.SearchClient;
 import lol.pbu.z4j.model.SearchResponse;
+import lol.pbu.z4j.model.Group;
+import lol.pbu.z4j.model.Organization;
+import lol.pbu.z4j.model.SearchResult;
+import lol.pbu.z4j.model.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 @Singleton
 public class ZendeskSearchTools {
@@ -50,42 +56,77 @@ public class ZendeskSearchTools {
         String resolvedInclude = resolveInclude(include);
         log.info("MCP Tool called: search(query='{}', include='{}', maxResults={})", query, resolvedInclude, limit);
 
-        SearchResponse accumulatedResponse = new SearchResponse();
-        accumulatedResponse.setResults(new ArrayList<>());
-        accumulatedResponse.setUsers(new ArrayList<>());
-        accumulatedResponse.setOrganizations(new ArrayList<>());
-        accumulatedResponse.setGroups(new ArrayList<>());
-
-        return fetchSearchPage(query, resolvedInclude, 1, limit, accumulatedResponse);
+        return fetchSearchPage(query, resolvedInclude, 1, limit)
+                .map(response -> finalizeResponse(response, limit));
     }
 
     private Mono<SearchResponse> fetchSearchPage(
             String query,
             String resolvedInclude,
             int page,
-            int limit,
-            SearchResponse accumulatedResponse
+            int limit
     ) {
         return searchClient.list(query, resolvedInclude, null, null, page, 100)
                 .flatMap(pageResponse -> {
                     if (isPageEmpty(pageResponse)) {
-                        return Mono.just(finalizeResponse(accumulatedResponse, limit));
+                        return Mono.just(emptySearchResponse());
                     }
-                    mergePageResults(accumulatedResponse, pageResponse);
-                    if (pageResponse.getNextPage() != null && accumulatedResponse.getResults().size() < limit) {
-                        return fetchSearchPage(query, resolvedInclude, page + 1, limit, accumulatedResponse);
+                    int currentCount = pageResponse.getResults().size();
+                    if (pageResponse.getNextPage() != null && currentCount < limit) {
+                        return fetchSearchPage(query, resolvedInclude, page + 1, limit - currentCount)
+                                .map(nextPageResponse -> combineResponses(pageResponse, nextPageResponse));
                     }
-                    return Mono.just(finalizeResponse(accumulatedResponse, limit));
+                    return Mono.just(pageResponse);
                 })
-                .defaultIfEmpty(finalizeResponse(accumulatedResponse, limit));
+                .defaultIfEmpty(emptySearchResponse());
     }
 
-    private SearchResponse finalizeResponse(SearchResponse accumulatedResponse, int limit) {
-        if (accumulatedResponse.getResults().size() > limit) {
-            accumulatedResponse.setResults(accumulatedResponse.getResults().subList(0, limit));
+    private SearchResponse emptySearchResponse() {
+        SearchResponse response = new SearchResponse();
+        response.setResults(Collections.emptyList());
+        response.setUsers(Collections.emptyList());
+        response.setOrganizations(Collections.emptyList());
+        response.setGroups(Collections.emptyList());
+        response.setCount(0);
+        return response;
+    }
+
+    private SearchResponse combineResponses(SearchResponse first, SearchResponse second) {
+        SearchResponse combined = new SearchResponse();
+        List<SearchResult> results = new ArrayList<>(first.getResults() != null ? first.getResults() : Collections.emptyList());
+        if (second.getResults() != null) {
+            results.addAll(second.getResults());
         }
-        accumulatedResponse.setCount(accumulatedResponse.getResults().size());
-        return accumulatedResponse;
+        combined.setResults(results);
+
+        List<User> users = new ArrayList<>(first.getUsers() != null ? first.getUsers() : Collections.emptyList());
+        if (second.getUsers() != null) {
+            users.addAll(second.getUsers());
+        }
+        combined.setUsers(users);
+
+        List<Organization> orgs = new ArrayList<>(first.getOrganizations() != null ? first.getOrganizations() : Collections.emptyList());
+        if (second.getOrganizations() != null) {
+            orgs.addAll(second.getOrganizations());
+        }
+        combined.setOrganizations(orgs);
+
+        List<Group> groups = new ArrayList<>(first.getGroups() != null ? first.getGroups() : Collections.emptyList());
+        if (second.getGroups() != null) {
+            groups.addAll(second.getGroups());
+        }
+        combined.setGroups(groups);
+
+        return combined;
+    }
+
+    private SearchResponse finalizeResponse(SearchResponse response, int limit) {
+        List<SearchResult> results = response.getResults() != null ? response.getResults() : Collections.emptyList();
+        if (results.size() > limit) {
+            response.setResults(new ArrayList<>(results.subList(0, limit)));
+        }
+        response.setCount(response.getResults().size());
+        return response;
     }
 
     @Tool(description = "Get the count of search results matching a query in Zendesk")
@@ -99,18 +140,5 @@ public class ZendeskSearchTools {
 
     private boolean isPageEmpty(SearchResponse pageResponse) {
         return pageResponse == null || pageResponse.getResults() == null || pageResponse.getResults().isEmpty();
-    }
-
-    private void mergePageResults(SearchResponse accumulatedResponse, SearchResponse pageResponse) {
-        accumulatedResponse.getResults().addAll(pageResponse.getResults());
-        if (pageResponse.getUsers() != null) {
-            accumulatedResponse.getUsers().addAll(pageResponse.getUsers());
-        }
-        if (pageResponse.getOrganizations() != null) {
-            accumulatedResponse.getOrganizations().addAll(pageResponse.getOrganizations());
-        }
-        if (pageResponse.getGroups() != null) {
-            accumulatedResponse.getGroups().addAll(pageResponse.getGroups());
-        }
     }
 }
