@@ -1,6 +1,7 @@
 package lol.pbu.tools;
 
 import io.micronaut.core.annotation.Order;
+import io.micronaut.core.io.buffer.ByteBuffer;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.json.tree.JsonNode;
@@ -32,6 +33,8 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
     private static final Logger log = LoggerFactory.getLogger(HttpClientResponseExceptionMcpErrorMapper.class);
     private static final String KEY_DESCRIPTION = "description";
+    private static final String KEY_MESSAGE = "message";
+    private static final String KEY_DETAILS = "details";
 
     private final ObjectMapper objectMapper;
 
@@ -48,8 +51,8 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     @Override
     public McpError map(HttpClientResponseException e) {
         HttpResponse<?> response = e.getResponse();
-        int statusCode = resolveStatusCode(response, e);
-        String reason = resolveReason(response, e);
+        int statusCode = response.code();
+        String reason = response.reason();
 
         // Explicit handling for HTTP 429 (Too Many Requests / Rate Limited)
         if (statusCode == 429) {
@@ -92,21 +95,6 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         return fallback;
     }
 
-
-    private int resolveStatusCode(HttpResponse<?> response, HttpClientResponseException e) {
-        if (response != null) {
-            return response.code();
-        }
-        return e.getStatus().getCode();
-    }
-
-    private String resolveReason(HttpResponse<?> response, HttpClientResponseException e) {
-        if (response != null) {
-            return response.reason();
-        }
-        return e.getStatus().getReason();
-    }
-
     private int resolveMcpErrorCode(int statusCode) {
         return switch (statusCode) {
             case 400, 422, 413 -> -32602; // Invalid params
@@ -128,9 +116,6 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     }
 
     private String resolveWaitTime(HttpResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
         String retryAfter = response.header("Retry-After");
         if (retryAfter != null && !retryAfter.isBlank()) {
             return retryAfter.trim();
@@ -154,9 +139,6 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     }
 
     private String extractZendeskErrorMessage(HttpResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
         String body = resolveResponseBody(response);
         if (body == null || body.isEmpty()) {
             return null;
@@ -178,21 +160,33 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     }
 
     private String resolveResponseBody(HttpResponse<?> response) {
+        Object rawBody = response.body();
+        if (rawBody instanceof ByteBuffer<?> buf) {
+            return buf.toString(StandardCharsets.UTF_8).trim();
+        } else if (rawBody instanceof byte[] bytes) {
+            return new String(bytes, StandardCharsets.UTF_8).trim();
+        } else if (rawBody instanceof CharSequence cs) {
+            return cs.toString().trim();
+        } else if (rawBody instanceof JsonNode jn) {
+            try {
+                return objectMapper.writeValueAsString(jn).trim();
+            } catch (Exception _) {
+                return null;
+            }
+        }
+        if (rawBody != null && !(rawBody instanceof String)) {
+            try {
+                return objectMapper.writeValueAsString(rawBody).trim();
+            } catch (Exception _) {
+                // fallback to string conversion below
+            }
+        }
         Optional<String> bodyOpt = response.getBody(String.class);
         if (bodyOpt.isPresent()) {
             return bodyOpt.get().trim();
         }
-        Object rawBody = response.body();
-        if (rawBody instanceof byte[] bytes) {
-            return new String(bytes, StandardCharsets.UTF_8).trim();
-        } else if (rawBody instanceof CharSequence cs) {
-            return cs.toString().trim();
-        } else if (rawBody != null) {
-            try {
-                return objectMapper.writeValueAsString(rawBody).trim();
-            } catch (Exception _) {
-                return rawBody.toString().trim();
-            }
+        if (rawBody != null) {
+            return rawBody.toString().trim();
         }
         return null;
     }
@@ -200,17 +194,21 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     private String parseJsonDiagnostic(String body) {
         try {
             JsonNode rootNode = objectMapper.readValue(body, JsonNode.class);
-            if (rootNode == null || !rootNode.isObject()) {
+            if (rootNode == null || (!rootNode.isObject() && !rootNode.isArray())) {
                 return null;
             }
-            StringBuilder sb = new StringBuilder();
-            String error = readTextValue(rootNode.get("error"));
-            if (error != null) {
-                sb.append(error);
+            if (rootNode.isArray()) {
+                String formatted = formatArrayErrors(rootNode);
+                return (formatted != null && !formatted.isBlank()) ? formatted : null;
             }
-            appendDiagnosticMessage(sb, error, rootNode.get(KEY_DESCRIPTION), rootNode.get("message"));
+            StringBuilder sb = new StringBuilder();
+            appendErrorNode(sb, rootNode.get("error"));
+            appendErrorsNode(sb, rootNode.get("errors"));
 
-            JsonNode detailsNode = rootNode.get("details");
+            String currentError = !sb.isEmpty() ? sb.toString() : null;
+            appendDiagnosticMessage(sb, currentError, rootNode.get(KEY_DESCRIPTION), rootNode.get(KEY_MESSAGE));
+
+            JsonNode detailsNode = rootNode.get(KEY_DETAILS);
             if (detailsNode != null && !detailsNode.isNull()) {
                 appendWithSeparator(sb, ": ", formatDetails(detailsNode));
             }
@@ -219,6 +217,88 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             log.debug("Could not parse Zendesk error response body as JSON: {}", parseEx.getMessage());
             return null;
         }
+    }
+
+    private void appendErrorNode(StringBuilder sb, JsonNode errorNode) {
+        if (errorNode == null || errorNode.isNull()) {
+            return;
+        }
+        if (errorNode.isObject()) {
+            String title = readTextValue(errorNode.get("title"));
+            String msg = readTextValue(errorNode.get(KEY_MESSAGE));
+            String desc = readTextValue(errorNode.get(KEY_DESCRIPTION));
+            if (title != null) {
+                sb.append(title);
+            }
+            appendDiagnosticMessage(sb, title, desc != null ? errorNode.get(KEY_DESCRIPTION) : null, msg != null ? errorNode.get(KEY_MESSAGE) : null);
+            JsonNode errDetails = errorNode.get(KEY_DETAILS);
+            if (errDetails != null && !errDetails.isNull()) {
+                appendWithSeparator(sb, ": ", formatDetails(errDetails));
+            }
+        } else {
+            String error = readTextValue(errorNode);
+            if (error != null) {
+                sb.append(error);
+            }
+        }
+    }
+
+    private void appendErrorsNode(StringBuilder sb, JsonNode errorsNode) {
+        if (errorsNode == null || errorsNode.isNull()) {
+            return;
+        }
+        String formattedErrors = errorsNode.isArray() ? formatArrayErrors(errorsNode) : formatDetails(errorsNode);
+        if (formattedErrors != null && !formattedErrors.isBlank()) {
+            appendWithSeparator(sb, " - ", formattedErrors);
+        }
+    }
+
+    private String formatArrayErrors(JsonNode arrayNode) {
+        List<String> items = new ArrayList<>();
+        for (JsonNode item : arrayNode.values()) {
+            if (item == null || item.isNull()) {
+                continue;
+            }
+            String formatted = formatArrayItem(item);
+            if (formatted != null && !formatted.isBlank()) {
+                items.add(formatted);
+            }
+        }
+        return String.join("; ", items);
+    }
+
+    private String formatArrayItem(JsonNode item) {
+        if (!item.isObject()) {
+            return readTextValue(item);
+        }
+        StringBuilder itemSb = new StringBuilder();
+        String header = resolveItemHeader(item);
+        if (header != null) {
+            itemSb.append(header);
+        }
+        String desc = readTextValue(item.get(KEY_DESCRIPTION));
+        String msg = readTextValue(item.get(KEY_MESSAGE));
+        String detail = desc != null ? desc : msg;
+        if (detail != null && !detail.equals(header)) {
+            appendWithSeparator(itemSb, ": ", detail);
+        }
+        JsonNode itemDetails = item.get(KEY_DETAILS);
+        if (itemDetails != null && !itemDetails.isNull()) {
+            appendWithSeparator(itemSb, " - ", formatDetails(itemDetails));
+        }
+        return !itemSb.isEmpty() ? itemSb.toString() : null;
+    }
+
+    private String resolveItemHeader(JsonNode item) {
+        String title = readTextValue(item.get("title"));
+        if (title != null) {
+            return title;
+        }
+        String code = readTextValue(item.get("code"));
+        if (code != null) {
+            return code;
+        }
+        return readTextValue(item.get("error"));
     }
 
     private void appendDiagnosticMessage(StringBuilder sb, String error, JsonNode descNode, JsonNode msgNode) {

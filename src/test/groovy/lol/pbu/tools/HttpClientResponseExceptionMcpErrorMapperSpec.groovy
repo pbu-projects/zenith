@@ -1,9 +1,12 @@
 package lol.pbu.tools
 
+import io.micronaut.core.io.buffer.ByteArrayBufferFactory
 import io.micronaut.http.HttpResponse
 import io.micronaut.http.HttpStatus
 import io.micronaut.http.client.exceptions.HttpClientResponseException
+import io.micronaut.json.tree.JsonNode
 import io.micronaut.serde.ObjectMapper
+import java.nio.charset.StandardCharsets
 import spock.lang.Specification
 
 class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
@@ -220,7 +223,7 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
 
     def "extracts error diagnosis from byte[] raw response body"() {
         given:
-        byte[] bytes = '{"error":"InvalidData","description":"Byte payload error"}'.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        byte[] bytes = '{"error":"InvalidData","description":"Byte payload error"}'.getBytes(StandardCharsets.UTF_8)
         def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(bytes)
         def ex = new HttpClientResponseException("Bad Request", response)
 
@@ -317,7 +320,261 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
         mcpError.jsonRpcError.code == -32603
         mcpError.message.contains("Cyclic network error")
     }
+
+    def "extracts error diagnosis from ByteBuffer raw response body"() {
+        given:
+        byte[] bytes = '{"error":"InvalidData","description":"ByteBuffer payload error"}'.getBytes(StandardCharsets.UTF_8)
+        def buffer = ByteArrayBufferFactory.INSTANCE.wrap(bytes)
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(buffer)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("InvalidData - ByteBuffer payload error")
+    }
+
+    def "formats structured error diagnosis when error field is a JSON object"() {
+        given:
+        def json = '{"error":{"title":"InvalidAttribute","message":"Record validation errors","details":{"requester":[{"description":"Requester 382716491823 is not a valid user"}]}}}'
+        def response = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY).body(json)
+        def ex = new HttpClientResponseException("Unprocessable Entity", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("InvalidAttribute - Record validation errors: requester: Requester 382716491823 is not a valid user")
+    }
+
+    def "formats structured error diagnosis when errors field is an array of objects"() {
+        given:
+        def json = '{"errors":[{"title":"InvalidAttribute","message":"Requester is invalid"}]}'
+        def response = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY).body(json)
+        def ex = new HttpClientResponseException("Unprocessable Entity", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("InvalidAttribute: Requester is invalid")
+    }
+
+    def "formats structured error diagnosis when root is an array of error messages"() {
+        given:
+        def json = '["Custom status 1000000000002 not found", "Requester ID invalid"]'
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(json)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("Custom status 1000000000002 not found; Requester ID invalid")
+    }
+
+    def "canMap correctly identifies supported exception types"() {
+        expect:
+        mapper.canMap(HttpClientResponseException)
+        !mapper.canMap(IllegalArgumentException)
+        !mapper.canMap(RuntimeException)
+    }
+
+    def "extracts error diagnosis from byte array raw response body"() {
+        given:
+        byte[] bytes = '{"error":"ByteArrayError","description":"Raw byte array payload"}'.getBytes(StandardCharsets.UTF_8)
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(bytes)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("ByteArrayError - Raw byte array payload")
+    }
+
+    def "extracts error diagnosis from CharSequence raw response body"() {
+        given:
+        CharSequence seq = new StringBuilder('{"error":"CharSequenceError","description":"StringBuilder payload"}')
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(seq)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("CharSequenceError - StringBuilder payload")
+    }
+
+    def "extracts error diagnosis from JsonNode raw response body"() {
+        given:
+        JsonNode node = objectMapper.readValue('{"error":"JsonNodeError","description":"Parsed tree payload"}', JsonNode)
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(node)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("JsonNodeError - Parsed tree payload")
+    }
+
+    def "extracts error diagnosis from arbitrary POJO / Map serialized via objectMapper"() {
+        given:
+        def payloadMap = [error: "PojoError", description: "Serialized POJO map payload"]
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(payloadMap)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("PojoError - Serialized POJO map payload")
+    }
+
+    def "falls back to toString when body object serialization fails"() {
+        given:
+        def failingBody = new Object() {
+            @Override
+            String toString() {
+                return 'Unserializable plain text body'
+            }
+        }
+        def response = HttpResponse.status(HttpStatus.INTERNAL_SERVER_ERROR).body(failingBody)
+        def ex = new HttpClientResponseException("Server Error", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32603
+        mcpError.message.contains("Unserializable plain text body")
+    }
+
+    def "handles JSON primitive root and falls back gracefully"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body("12345")
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("12345")
+    }
+
+    def "formats error object with title and details"() {
+        given:
+        def json = '{"error":{"title":"InvalidField","details":{"email":"is invalid"}}}'
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(json)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("InvalidField: email: is invalid")
+    }
+
+    def "formats error object with message when title is null"() {
+        given:
+        def json = '{"error":{"message":"Only message provided"}}'
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(json)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("Only message provided")
+    }
+
+    def "formats errors object when errors is a JSON object instead of array"() {
+        given:
+        def json = '{"errors":{"field":[{"description":"field is required"}]}}'
+        def response = HttpResponse.status(HttpStatus.UNPROCESSABLE_ENTITY).body(json)
+        def ex = new HttpClientResponseException("Unprocessable Entity", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("field: field is required")
+    }
+
+    def "formats root message and description when error field is absent"() {
+        given:
+        def jsonDesc = '{"description":"Root description","details":{"code":"1001"}}'
+        def responseDesc = HttpResponse.status(HttpStatus.BAD_REQUEST).body(jsonDesc)
+        def exDesc = new HttpClientResponseException("Bad Request", responseDesc)
+
+        when:
+        def mcpErrorDesc = mapper.map(exDesc)
+
+        then:
+        mcpErrorDesc.jsonRpcError.code == -32602
+        mcpErrorDesc.message.contains("Root description: code: 1001")
+
+        when: "only message is present on root"
+        def jsonMsg = '{"message":"Root message only"}'
+        def responseMsg = HttpResponse.status(HttpStatus.BAD_REQUEST).body(jsonMsg)
+        def exMsg = new HttpClientResponseException("Bad Request", responseMsg)
+        def mcpErrorMsg = mapper.map(exMsg)
+
+        then:
+        mcpErrorMsg.jsonRpcError.code == -32602
+        mcpErrorMsg.message.contains("Root message only")
+    }
+
+    def "formats array errors with code, error, details, and null elements"() {
+        given:
+        def json = '''[
+            null,
+            {},
+            {"code":"DuplicateCode","message":"Already exists"},
+            {"error":"ErrorField","message":"Something wrong"},
+            {"title":"DetailsField","details":{"info":[{"description":"Detailed info"}]}}
+        ]'''
+        def response = HttpResponse.status(HttpStatus.BAD_REQUEST).body(json)
+        def ex = new HttpClientResponseException("Bad Request", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32602
+        mcpError.message.contains("DuplicateCode: Already exists")
+        mcpError.message.contains("ErrorField: Something wrong")
+        mcpError.message.contains("DetailsField - info: Detailed info")
+    }
+
+    def "handles non-JSON plain text body without HTML"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.BAD_GATEWAY).body("Plain text upstream error")
+        def ex = new HttpClientResponseException("Bad Gateway", response)
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32603
+        mcpError.message.contains("Plain text upstream error")
+    }
 }
+
 
 
 

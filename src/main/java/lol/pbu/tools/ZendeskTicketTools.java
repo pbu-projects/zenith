@@ -276,8 +276,8 @@ public class ZendeskTicketTools {
 
     private void applyRequesterAndType(TicketCreateInput input, @Nullable Long requesterId, @Nullable String type) {
         if (requesterId != null) {
-            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
-                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
+            if (requesterId <= 0) {
+                throw new IllegalArgumentException("requesterId must be a positive integer, got: " + requesterId);
             }
             input.setRequesterId(requesterId);
         }
@@ -296,7 +296,7 @@ public class ZendeskTicketTools {
             return;
         }
         validateCustomStatusBounds(resolvedCustomStatusId);
-        String targetStatus = (status != null && !status.isBlank()) ? status : "new";
+        String targetStatus = (status != null && !status.isBlank()) ? status : null;
         TicketFieldCustomStatusObject validated = validateCustomStatus(resolvedCustomStatusId, targetStatus);
         if (resolvedTicketFormId != null && validated != null) {
             validateCustomStatusForForm(validated, resolvedTicketFormId);
@@ -476,8 +476,8 @@ public class ZendeskTicketTools {
         populateInputFromParams(input, comment, status, priority, isPublic, tokens, customFields);
 
         if (requesterId != null) {
-            if (requesterId > Integer.MAX_VALUE || requesterId < Integer.MIN_VALUE) {
-                throw new IllegalArgumentException("requesterId " + requesterId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits requester_id on ticket inputs to 32-bit integers.");
+            if (requesterId <= 0) {
+                throw new IllegalArgumentException("requesterId must be a positive integer, got: " + requesterId);
             }
             input.setRequesterId(requesterId);
         }
@@ -541,9 +541,6 @@ public class ZendeskTicketTools {
         if (problemId == null) return;
         if (problemId <= 0) {
             throw new IllegalArgumentException("problemId must be a positive integer, got: " + problemId);
-        }
-        if (problemId > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("problemId " + problemId + " exceeds 32-bit integer range (max: " + Integer.MAX_VALUE + "). Upstream z4j library currently limits problem_id on ticket inputs to 32-bit integers.");
         }
         try {
             TicketResponse resp = ticketClient.showTicket(problemId).block();
