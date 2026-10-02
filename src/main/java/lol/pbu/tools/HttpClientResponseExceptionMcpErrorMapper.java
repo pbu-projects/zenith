@@ -49,8 +49,8 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     @Override
     public McpError map(HttpClientResponseException e) {
         HttpResponse<?> response = e.getResponse();
-        int statusCode = resolveStatusCode(response, e);
-        String reason = resolveReason(response, e);
+        int statusCode = response.code();
+        String reason = response.reason();
 
         // Explicit handling for HTTP 429 (Too Many Requests / Rate Limited)
         if (statusCode == 429) {
@@ -93,21 +93,6 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         return fallback;
     }
 
-
-    private int resolveStatusCode(HttpResponse<?> response, HttpClientResponseException e) {
-        if (response != null) {
-            return response.code();
-        }
-        return e.getStatus().getCode();
-    }
-
-    private String resolveReason(HttpResponse<?> response, HttpClientResponseException e) {
-        if (response != null) {
-            return response.reason();
-        }
-        return e.getStatus().getReason();
-    }
-
     private int resolveMcpErrorCode(int statusCode) {
         return switch (statusCode) {
             case 400, 422, 413 -> -32602; // Invalid params
@@ -129,9 +114,6 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     }
 
     private String resolveWaitTime(HttpResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
         String retryAfter = response.header("Retry-After");
         if (retryAfter != null && !retryAfter.isBlank()) {
             return retryAfter.trim();
@@ -155,9 +137,6 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
     }
 
     private String extractZendeskErrorMessage(HttpResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
         String body = resolveResponseBody(response);
         if (body == null || body.isEmpty()) {
             return null;
@@ -187,18 +166,25 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         } else if (rawBody instanceof CharSequence cs) {
             return cs.toString().trim();
         } else if (rawBody instanceof JsonNode jn) {
-            return jn.toString().trim();
+            try {
+                return objectMapper.writeValueAsString(jn).trim();
+            } catch (Exception _) {
+                return null;
+            }
+        }
+        if (rawBody != null && !(rawBody instanceof String)) {
+            try {
+                return objectMapper.writeValueAsString(rawBody).trim();
+            } catch (Exception _) {
+                // fallback to string conversion below
+            }
         }
         Optional<String> bodyOpt = response.getBody(String.class);
         if (bodyOpt.isPresent()) {
             return bodyOpt.get().trim();
         }
         if (rawBody != null) {
-            try {
-                return objectMapper.writeValueAsString(rawBody).trim();
-            } catch (Exception _) {
-                return rawBody.toString().trim();
-            }
+            return rawBody.toString().trim();
         }
         return null;
     }

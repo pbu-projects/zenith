@@ -2757,6 +2757,592 @@ class ZendeskToolsValidationSpec extends Specification {
         def e2 = thrown(IllegalArgumentException)
         e2.message.contains("Unrecognized parameter: 'unknownParam'")
     }
+
+    def "listCustomObjects lists all custom objects"() {
+        given:
+        customObjectsClient.listCustomObjects() >> Mono.just(new CustomObjectsResponse())
+
+        when:
+        def resp = tools.listCustomObjects()
+
+        then:
+        resp != null
+    }
+
+    def "getCustomObject fetches custom object by key and validates required key"() {
+        given:
+        customObjectsClient.showCustomObject("car") >> Mono.just(new CustomObjectResponse().tap {
+            customObject = new CustomObject().tap {
+                key = "car"
+                title = "Car"
+            }
+        })
+
+        when: "key is null"
+        tools.getCustomObject(null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "key is blank"
+        tools.getCustomObject("   ")
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObjectKey is required")
+
+        when: "valid key"
+        def resp = tools.getCustomObject("car")
+
+        then:
+        resp != null
+        resp.customObject.key == "car"
+        resp.customObject.title == "Car"
+    }
+
+    def "createCustomObject direct overload validates request object and delegates"() {
+        given:
+        customObjectsClient.createCustomObject(_ as CustomObjectsCreateRequest) >> { CustomObjectsCreateRequest req ->
+            Mono.just(new CustomObjectResponse().tap {
+                customObject = req.customObject
+            })
+        }
+
+        when: "request is null"
+        tools.createCustomObject(null as CustomObjectsCreateRequest)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObject is required")
+
+        when: "customObject in request is null"
+        tools.createCustomObject(new CustomObjectsCreateRequest(null))
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObject is required")
+
+        when: "valid request"
+        def req = new CustomObjectsCreateRequest(new CustomObject().tap {
+            key = "device"
+            title = "Device"
+            titlePluralized = "Devices"
+        })
+        def resp = tools.createCustomObject(req)
+
+        then:
+        resp != null
+        resp.customObject.key == "device"
+    }
+
+    def "updateCustomObject direct overload validates arguments and delegates"() {
+        given:
+        customObjectsClient.updateCustomObject(_ as String, _ as CustomObjectsCreateRequest) >> { String key, CustomObjectsCreateRequest req ->
+            Mono.just(new CustomObjectResponse().tap {
+                customObject = req.customObject
+            })
+        }
+
+        when: "key is null"
+        tools.updateCustomObject(null as String, new CustomObjectsCreateRequest(new CustomObject()))
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "key is blank"
+        tools.updateCustomObject("   ", new CustomObjectsCreateRequest(new CustomObject()))
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObjectKey is required")
+
+        when: "request is null"
+        tools.updateCustomObject("car", null as CustomObjectsCreateRequest)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("customObject is required")
+
+        when: "valid update"
+        def req = new CustomObjectsCreateRequest(new CustomObject().tap {
+            title = "Fleet Car"
+        })
+        def resp = tools.updateCustomObject("car", req)
+
+        then:
+        resp != null
+        resp.customObject.title == "Fleet Car"
+    }
+
+    def "deleteCustomObject validates blank key and CallToolRequest unknown parameters"() {
+        when: "blank customObjectKey"
+        tools.deleteCustomObject("   ")
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required when deleting a custom object.")
+
+        when: "unknown parameter in deleteCustomObject"
+        def badReq = new CallToolRequest("deleteCustomObject", [customObjectKey: "car", badParam: "extra"])
+        tools.deleteCustomObject("car", badReq)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Unrecognized parameter: 'badParam'")
+        e2.message.contains("Check the tool documentation for valid parameters.")
+    }
+
+    def "listCustomObjectRecords lists records with all parameters and validates customObjectKey"() {
+        given:
+        String capturedKey = null
+        String capturedFilterIds = null
+        String capturedFilterExtIds = null
+        String capturedSort = null
+        String capturedPageBefore = null
+        String capturedPageAfter = null
+        Long capturedPageSize = null
+
+        customObjectRecordsClient.listCustomObjectRecords(_, _, _, _, _, _, _) >> {
+            String k, String fi, String fe, String s, String pb, String pa, Long ps ->
+                capturedKey = k
+                capturedFilterIds = fi
+                capturedFilterExtIds = fe
+                capturedSort = s
+                capturedPageBefore = pb
+                capturedPageAfter = pa
+                capturedPageSize = ps
+                Mono.just(new CustomObjectRecordsResponse().tap {
+                    customObjectRecords = [new CustomObjectRecord().tap { name = "Record 1" }]
+                })
+        }
+
+        when: "customObjectKey is null"
+        tools.listCustomObjectRecords(null, null, null, null, null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "customObjectKey is blank"
+        tools.listCustomObjectRecords("   ", null, null, null, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObjectKey is required")
+
+        when: "unknown parameter in request"
+        def badReq = new CallToolRequest("listCustomObjectRecords", [customObjectKey: "car", invalidParam: "x"])
+        tools.listCustomObjectRecords("car", null, null, null, null, null, null, badReq)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("Unrecognized parameter: 'invalidParam'")
+
+        when: "valid call with all parameters"
+        def resp = tools.listCustomObjectRecords("car", "rec_1,rec_2", "ext_10", "created_at", "cur_b", "cur_a", 25L, null)
+
+        then:
+        resp != null
+        resp.customObjectRecords.size() == 1
+        capturedKey == "car"
+        capturedFilterIds == "rec_1,rec_2"
+        capturedFilterExtIds == "ext_10"
+        capturedSort == "created_at"
+        capturedPageBefore == "cur_b"
+        capturedPageAfter == "cur_a"
+        capturedPageSize == 25L
+
+        when: "1-argument overload is called"
+        def resp2 = tools.listCustomObjectRecords("car")
+
+        then:
+        resp2 != null
+        capturedKey == "car"
+        capturedFilterIds == null
+        capturedPageSize == null
+    }
+
+    def "getCustomObjectRecord fetches record and validates required keys"() {
+        given:
+        customObjectRecordsClient.showCustomObjectRecord("car", "rec_42") >> Mono.just(new CustomObjectRecordResponse().tap {
+            customObjectRecord = new CustomObjectRecord().tap {
+                name = "Record 42"
+            }
+        })
+
+        when: "key is null"
+        tools.getCustomObjectRecord(null, "rec_42")
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "key is blank"
+        tools.getCustomObjectRecord("   ", "rec_42")
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObjectKey is required")
+
+        when: "recordId is null"
+        tools.getCustomObjectRecord("car", null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("recordId is required")
+
+        when: "recordId is blank"
+        tools.getCustomObjectRecord("car", "   ")
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("recordId is required")
+
+        when: "valid call"
+        def resp = tools.getCustomObjectRecord("car", "rec_42")
+
+        then:
+        resp != null
+        resp.customObjectRecord.name == "Record 42"
+    }
+
+    def "createCustomObjectRecord direct overload validates arguments and delegates"() {
+        given:
+        customObjectRecordsClient.createCustomObjectRecord(_ as String, _ as CustomObjectRecordsCreateRequest) >> { String k, CustomObjectRecordsCreateRequest req ->
+            Mono.just(new CustomObjectRecordResponse().tap {
+                customObjectRecord = req.customObjectRecord
+            })
+        }
+
+        when: "key is null"
+        tools.createCustomObjectRecord(null as String, new CustomObjectRecordsCreateRequest(new CustomObjectRecord()))
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "key is blank"
+        tools.createCustomObjectRecord("   ", new CustomObjectRecordsCreateRequest(new CustomObjectRecord()))
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObjectKey is required")
+
+        when: "request is null"
+        tools.createCustomObjectRecord("car", null as CustomObjectRecordsCreateRequest)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("customObjectRecord is required")
+
+        when: "customObjectRecord in request is null"
+        tools.createCustomObjectRecord("car", new CustomObjectRecordsCreateRequest(null))
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("customObjectRecord is required")
+
+        when: "valid direct overload call"
+        def req = new CustomObjectRecordsCreateRequest(new CustomObjectRecord().tap {
+            name = "Car #10"
+        })
+        def resp = tools.createCustomObjectRecord("car", req)
+
+        then:
+        resp != null
+        resp.customObjectRecord.name == "Car #10"
+    }
+
+    def "updateCustomObjectRecord direct overload validates arguments and delegates"() {
+        given:
+        customObjectRecordsClient.updateCustomObjectRecord(_ as String, _ as String, _ as CustomObjectRecordsCreateRequest) >> { String k, String id, CustomObjectRecordsCreateRequest req ->
+            Mono.just(new CustomObjectRecordResponse().tap {
+                customObjectRecord = req.customObjectRecord
+            })
+        }
+
+        when: "key is null"
+        tools.updateCustomObjectRecord(null as String, "rec_1", new CustomObjectRecordsCreateRequest(new CustomObjectRecord()))
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "key is blank"
+        tools.updateCustomObjectRecord("   ", "rec_1", new CustomObjectRecordsCreateRequest(new CustomObjectRecord()))
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObjectKey is required")
+
+        when: "recordId is null"
+        tools.updateCustomObjectRecord("car", null as String, new CustomObjectRecordsCreateRequest(new CustomObjectRecord()))
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("recordId is required")
+
+        when: "recordId is blank"
+        tools.updateCustomObjectRecord("car", "   ", new CustomObjectRecordsCreateRequest(new CustomObjectRecord()))
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("recordId is required")
+
+        when: "request is null"
+        tools.updateCustomObjectRecord("car", "rec_1", null as CustomObjectRecordsCreateRequest)
+
+        then:
+        def e5 = thrown(IllegalArgumentException)
+        e5.message.contains("customObjectRecord is required")
+
+        when: "valid direct overload call"
+        def req = new CustomObjectRecordsCreateRequest(new CustomObjectRecord().tap {
+            name = "Updated Record"
+        })
+        def resp = tools.updateCustomObjectRecord("car", "rec_1", req)
+
+        then:
+        resp != null
+        resp.customObjectRecord.name == "Updated Record"
+    }
+
+    def "deleteCustomObjectRecord validates blank arguments and CallToolRequest"() {
+        when: "blank customObjectKey"
+        tools.deleteCustomObjectRecord("   ", "rec_1", null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required when deleting a custom object record.")
+
+        when: "blank recordId"
+        tools.deleteCustomObjectRecord("car", "   ", null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("recordId is required when deleting a custom object record.")
+
+        when: "unknown parameter in deleteCustomObjectRecord"
+        def badReq = new CallToolRequest("deleteCustomObjectRecord", [customObjectKey: "car", recordId: "rec_1", extraneous: "bad"])
+        tools.deleteCustomObjectRecord("car", "rec_1", badReq)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("Unrecognized parameter: 'extraneous'")
+    }
+
+    def "searchCustomObjectRecords searches records and validates required arguments"() {
+        given:
+        String capturedKey = null
+        String capturedQuery = null
+        String capturedSort = null
+        String capturedPageBefore = null
+        String capturedPageAfter = null
+        Long capturedPageSize = null
+
+        customObjectRecordsClient.searchCustomObjectRecords(_, _, _, _, _, _) >> {
+            String k, String q, String s, String pb, String pa, Long ps ->
+                capturedKey = k
+                capturedQuery = q
+                capturedSort = s
+                capturedPageBefore = pb
+                capturedPageAfter = pa
+                capturedPageSize = ps
+                Mono.just(new CustomObjectRecordsResponse().tap {
+                    customObjectRecords = [new CustomObjectRecord().tap { name = "Found Record" }]
+                })
+        }
+
+        when: "customObjectKey is null"
+        tools.searchCustomObjectRecords(null, "query", null, null, null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("customObjectKey is required")
+
+        when: "customObjectKey is blank"
+        tools.searchCustomObjectRecords("   ", "query", null, null, null, null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("customObjectKey is required")
+
+        when: "query is null"
+        tools.searchCustomObjectRecords("car", null, null, null, null, null, null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("query is required")
+
+        when: "query is blank"
+        tools.searchCustomObjectRecords("car", "   ", null, null, null, null, null)
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("query is required")
+
+        when: "unknown parameter in search"
+        def badReq = new CallToolRequest("searchCustomObjectRecords", [customObjectKey: "car", query: "red", invalid: "bad"])
+        tools.searchCustomObjectRecords("car", "red", null, null, null, null, badReq)
+
+        then:
+        def e5 = thrown(IllegalArgumentException)
+        e5.message.contains("Unrecognized parameter: 'invalid'")
+
+        when: "valid search with all parameters"
+        def resp = tools.searchCustomObjectRecords("car", "red", "created_at", "cur_b", "cur_a", 15L, null)
+
+        then:
+        resp != null
+        resp.customObjectRecords.size() == 1
+        capturedKey == "car"
+        capturedQuery == "red"
+        capturedSort == "created_at"
+        capturedPageBefore == "cur_b"
+        capturedPageAfter == "cur_a"
+        capturedPageSize == 15L
+
+        when: "2-argument overload is called"
+        def resp2 = tools.searchCustomObjectRecords("car", "blue")
+
+        then:
+        resp2 != null
+        capturedKey == "car"
+        capturedQuery == "blue"
+        capturedSort == null
+        capturedPageSize == null
+    }
+
+    def "resolveCustomObject exercises all argument resolution branches"() {
+        given:
+        CustomObjectsCreateRequest capturedReq = null
+        customObjectsClient.createCustomObject(_ as CustomObjectsCreateRequest) >> { CustomObjectsCreateRequest req ->
+            capturedReq = req
+            Mono.just(new CustomObjectResponse().tap {
+                customObject = req.customObject
+            })
+        }
+
+        when: "nested custom_object (snake_case) in request arguments"
+        def callReq0 = new CallToolRequest("createCustomObject", [
+            custom_object: [
+                key: "watch",
+                title: "Watch",
+                title_pluralized: "Watches",
+                description: "Smart watches"
+            ]
+        ])
+        tools.createCustomObject(null, null, null, null, null, callReq0)
+
+        then:
+        capturedReq != null
+        capturedReq.customObject.key == "watch"
+        capturedReq.customObject.title == "Watch"
+        capturedReq.customObject.titlePluralized == "Watches"
+        capturedReq.customObject.description == "Smart watches"
+
+        when: "nested customObject in request arguments with camelCase titlePluralized"
+        def callReq1 = new CallToolRequest("createCustomObject", [
+            customObject: [
+                key: "phone",
+                title: "Phone",
+                titlePluralized: "Phones",
+                description: "Company phones"
+            ]
+        ])
+        tools.createCustomObject(null, null, null, null, null, callReq1)
+
+        then:
+        capturedReq != null
+        capturedReq.customObject.key == "phone"
+        capturedReq.customObject.title == "Phone"
+        capturedReq.customObject.titlePluralized == "Phones"
+        capturedReq.customObject.description == "Company phones"
+
+        when: "title_pluralized at top level in request arguments"
+        def callReq2 = new CallToolRequest("createCustomObject", [
+            key: "tablet",
+            title: "Tablet",
+            title_pluralized: "Tablets"
+        ])
+        tools.createCustomObject("tablet", "Tablet", null, null, null, callReq2)
+
+        then:
+        capturedReq != null
+        capturedReq.customObject.key == "tablet"
+        capturedReq.customObject.titlePluralized == "Tablets"
+    }
+
+    def "resolveCustomObjectRecord exercises all argument resolution branches"() {
+        given:
+        CustomObjectRecordsCreateRequest capturedReq = null
+        customObjectRecordsClient.createCustomObjectRecord(_ as String, _ as CustomObjectRecordsCreateRequest) >> { String k, CustomObjectRecordsCreateRequest req ->
+            capturedReq = req
+            Mono.just(new CustomObjectRecordResponse().tap {
+                customObjectRecord = req.customObjectRecord
+            })
+        }
+
+        when: "custom_object_record map in arguments with external_id and custom_object_fields"
+        def callReq1 = new CallToolRequest("createCustomObjectRecord", [
+            customObjectKey: "car",
+            custom_object_record: [
+                name: "Tesla #1",
+                external_id: "ext_tesla",
+                custom_object_fields: [battery: "100kWh"]
+            ]
+        ])
+        tools.createCustomObjectRecord("car", null, null, null, null, callReq1)
+
+        then:
+        capturedReq != null
+        capturedReq.customObjectRecord.name == "Tesla #1"
+        capturedReq.customObjectRecord.externalId == "ext_tesla"
+        capturedReq.customObjectRecord.customObjectFields == [battery: "100kWh"]
+
+        when: "customObjectRecord map in arguments with camelCase externalId and customObjectFields"
+        def callReq2 = new CallToolRequest("createCustomObjectRecord", [
+            customObjectKey: "car",
+            customObjectRecord: [
+                name: "Tesla #2",
+                externalId: "ext_tesla_2",
+                customObjectFields: [battery: "75kWh"]
+            ]
+        ])
+        tools.createCustomObjectRecord("car", null, null, null, null, callReq2)
+
+        then:
+        capturedReq != null
+        capturedReq.customObjectRecord.name == "Tesla #2"
+        capturedReq.customObjectRecord.externalId == "ext_tesla_2"
+        capturedReq.customObjectRecord.customObjectFields == [battery: "75kWh"]
+
+        when: "custom_object_fields and external_id at top level in request arguments"
+        def callReq3 = new CallToolRequest("createCustomObjectRecord", [
+            customObjectKey: "car",
+            name: "Tesla #3",
+            external_id: "ext_tesla_3",
+            custom_object_fields: [color: "silver"]
+        ])
+        tools.createCustomObjectRecord("car", "Tesla #3", null, null, null, callReq3)
+
+        then:
+        capturedReq != null
+        capturedReq.customObjectRecord.name == "Tesla #3"
+        capturedReq.customObjectRecord.externalId == "ext_tesla_3"
+        capturedReq.customObjectRecord.customObjectFields == [color: "silver"]
+    }
+
+    def "ticket tools validate non-positive requesterId on update and build"() {
+        when: "buildTicketUpdateInput has non-positive requesterId"
+        ticketTools.buildTicketUpdateInput(null, null, null, null, [], null, -10L, null, null, null, null)
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("requesterId must be a positive integer, got: -10")
+    }
 }
 
 
