@@ -28,7 +28,7 @@ class GetTicketsMockErrorSpec extends Specification {
         ticketClient.showTicket(123L) >> Mono.error(exception)
 
         when:
-        zendeskTools.getTickets([123L])
+        zendeskTools.getTickets([123L]).block()
 
         then:
         def e = thrown(RuntimeException)
@@ -41,7 +41,7 @@ class GetTicketsMockErrorSpec extends Specification {
         ticketClient.showTicket(999L) >> Mono.error(exception)
 
         when:
-        zendeskTools.getTickets([999L])
+        zendeskTools.getTickets([999L]).block()
 
         then:
         def e = thrown(RuntimeException)
@@ -54,7 +54,7 @@ class GetTicketsMockErrorSpec extends Specification {
         ticketClient.showTicket(456L) >> Mono.error(exception)
 
         when:
-        zendeskTools.getTickets([456L])
+        zendeskTools.getTickets([456L]).block()
 
         then:
         def e = thrown(RuntimeException)
@@ -66,7 +66,7 @@ class GetTicketsMockErrorSpec extends Specification {
         ticketClient.showTicket(789L) >> Mono.empty()
 
         when:
-        zendeskTools.getTickets([789L])
+        zendeskTools.getTickets([789L]).block()
 
         then:
         def e = thrown(RuntimeException)

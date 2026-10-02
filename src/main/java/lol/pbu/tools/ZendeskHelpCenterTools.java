@@ -22,6 +22,7 @@ import lol.pbu.z4j.model.TranslationResponse;
 import lol.pbu.z4j.model.TranslationsResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Map;
@@ -45,7 +46,7 @@ public class ZendeskHelpCenterTools {
         this.translationClient = translationClient;
     }
     @Tool(description = "Get details and content of a specific Zendesk Help Center / Knowledge Base article by its numeric ID")
-    public ArticleResponse getArticle(
+    public Mono<ArticleResponse> getArticle(
             @ToolArg(description = "The numeric article ID") Long articleId,
             @ToolArg(description = "Optional locale code, e.g. 'en-us'. Defaults to 'en-us'") @Nullable String locale
     ) {
@@ -54,11 +55,11 @@ public class ZendeskHelpCenterTools {
             throw new IllegalArgumentException("articleId is required");
         }
         LocaleAbbreviation localeAbbr = resolveLocale(locale);
-        return articleClient.showArticle(localeAbbr, articleId).block();
+        return articleClient.showArticle(localeAbbr, articleId);
     }
 
     @Tool(description = "List Zendesk Help Center / Knowledge Base articles")
-    public ArticlesResponse listArticles(
+    public Mono<ArticlesResponse> listArticles(
             @ToolArg(description = "Optional locale code, e.g. 'en-us'. Defaults to 'en-us'") @Nullable String locale,
             @ToolArg(description = "Optional sort field: position, title, created_at, updated_at, edited_at") @Nullable String sortBy,
             @ToolArg(description = "Optional sort order: asc or desc") @Nullable String sortOrder,
@@ -73,11 +74,11 @@ public class ZendeskHelpCenterTools {
                 resolveSortOrder(sortOrder),
                 startTime,
                 labelNames
-        ).block();
+        );
     }
 
     @Tool(description = "Create a new article in a Zendesk Help Center section")
-    public ArticleResponse createArticle(
+    public Mono<ArticleResponse> createArticle(
             @ToolArg(description = "The ID of the section to which the article belongs") Long sectionId,
             @ToolArg(description = "The title of the article") String title,
             @ToolArg(description = "The HTML body content of the article") String body,
@@ -114,11 +115,11 @@ public class ZendeskHelpCenterTools {
         if (userSegmentId != null) {
             article.setUserSegmentId(userSegmentId);
         }
-        return articleClient.createArticle(localeAbbr, sectionId, new ArticleCreateRequest(article)).block();
+        return articleClient.createArticle(localeAbbr, sectionId, new ArticleCreateRequest(article));
     }
 
     @Tool(description = "Update an existing Zendesk Help Center article")
-    public ArticleResponse updateArticle(
+    public Mono<ArticleResponse> updateArticle(
             @ToolArg(description = "The unique numeric ID of the article") Long articleId,
             @ToolArg(description = "Optional new title of the article") @Nullable String title,
             @ToolArg(description = "Optional new HTML body content of the article") @Nullable String body,
@@ -155,11 +156,11 @@ public class ZendeskHelpCenterTools {
         if (userSegmentId != null) {
             article.setUserSegmentId(userSegmentId);
         }
-        return articleClient.updateArticle(localeAbbr, articleId, new ArticleUpdateRequest(article)).block();
+        return articleClient.updateArticle(localeAbbr, articleId, new ArticleUpdateRequest(article));
     }
 
     @Tool(description = "Delete a Zendesk Help Center article translation for a given locale (or the article if it is the only translation). Requires confirm=true to prevent accidental deletion")
-    public Map<String, Object> deleteArticle(
+    public Mono<Map<String, Object>> deleteArticle(
             @ToolArg(description = "The unique numeric ID of the article to delete") Long articleId,
             @ToolArg(description = "Must be explicitly set to true to confirm deletion of this article") @Nullable Boolean confirm,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
@@ -172,12 +173,12 @@ public class ZendeskHelpCenterTools {
             throw new IllegalArgumentException("Deletion requires explicit confirmation. Set 'confirm' to true to proceed.");
         }
         LocaleAbbreviation localeAbbr = resolveLocale(locale);
-        articleClient.deleteArticle(localeAbbr, articleId).block();
-        return Map.of("success", true, "deletedArticleId", articleId);
+        return articleClient.deleteArticle(localeAbbr, articleId)
+                .thenReturn(Map.of("success", true, "deletedArticleId", articleId));
     }
 
     @Tool(description = "List translations for a Zendesk Help Center resource (e.g. 'articles', 'sections', 'categories')")
-    public TranslationsResponse listTranslations(
+    public Mono<TranslationsResponse> listTranslations(
             @ToolArg(description = "The resource type: 'articles', 'sections', or 'categories'") String resourceType,
             @ToolArg(description = "The numeric ID of the parent resource") Long resourceId
     ) {
@@ -186,11 +187,11 @@ public class ZendeskHelpCenterTools {
         if (resourceId == null) {
             throw new IllegalArgumentException("resourceId is required");
         }
-        return translationClient.listTranslations(validResourceType, resourceId).block();
+        return translationClient.listTranslations(validResourceType, resourceId);
     }
 
     @Tool(description = "Get a specific translation for a Zendesk Help Center resource by locale")
-    public TranslationResponse getTranslation(
+    public Mono<TranslationResponse> getTranslation(
             @ToolArg(description = "The resource type: 'articles', 'sections', or 'categories'") String resourceType,
             @ToolArg(description = "The numeric ID of the parent resource") Long resourceId,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). Defaults to 'en-us'") @Nullable String locale
@@ -200,22 +201,22 @@ public class ZendeskHelpCenterTools {
         if (resourceId == null) {
             throw new IllegalArgumentException("resourceId is required");
         }
-        return translationClient.showTranslation(validResourceType, resourceId, resolveLocale(locale)).block();
+        return translationClient.showTranslation(validResourceType, resourceId, resolveLocale(locale));
     }
 
     @Tool(description = "List Zendesk Help Center categories")
-    public CategoriesResponse listCategories(
+    public Mono<CategoriesResponse> listCategories(
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us'). If omitted, lists categories across all locales") @Nullable String locale
     ) {
         log.info("MCP Tool called: listCategories(locale='{}')", locale);
         if (locale != null && !locale.isBlank()) {
-            return categoryClient.listCategories(resolveLocale(locale), null, null).block();
+            return categoryClient.listCategories(resolveLocale(locale), null, null);
         }
-        return categoryClient.listCategoriesNoLocale(null, null).block();
+        return categoryClient.listCategoriesNoLocale(null, null);
     }
 
     @Tool(description = "Get details of a specific Zendesk Help Center category by its numeric ID")
-    public CategoryResponse getCategory(
+    public Mono<CategoryResponse> getCategory(
             @ToolArg(description = "The numeric category ID") Long categoryId,
             @ToolArg(description = "Optional locale abbreviation (e.g. 'en-us')") @Nullable String locale
     ) {
@@ -224,9 +225,9 @@ public class ZendeskHelpCenterTools {
             throw new IllegalArgumentException("categoryId is required");
         }
         if (locale != null && !locale.isBlank()) {
-            return categoryClient.showCategory(resolveLocale(locale), categoryId).block();
+            return categoryClient.showCategory(resolveLocale(locale), categoryId);
         }
-        return categoryClient.showCategoryNoLocale(categoryId).block();
+        return categoryClient.showCategoryNoLocale(categoryId);
     }
 
 

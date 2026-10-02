@@ -13,7 +13,7 @@ class GetTicketsFixSpec extends Specification {
 
     void 'getTickets fails loudly when fetching a ticket fails'() {
         when:
-        zendeskTicketTools.getTickets([999999999L])
+        zendeskTicketTools.getTickets([999999999L]).block()
 
         then:
         def e = thrown(RuntimeException)

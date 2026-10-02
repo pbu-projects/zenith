@@ -3,6 +3,7 @@ micronaut:
     name: zenith
   mcp:
     server:
+      reactive: true
       info:
         name: zenith-zendesk-mcp
         version: "@zenithVersion@"

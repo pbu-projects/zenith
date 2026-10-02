@@ -9,6 +9,7 @@ import lol.pbu.z4j.client.SearchClient;
 import lol.pbu.z4j.model.SearchResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 
@@ -39,7 +40,7 @@ public class ZendeskSearchTools {
     }
 
     @Tool(description = "Search Zendesk using Zendesk search syntax (e.g. 'type:ticket status:open', 'type:ticket created>2026-01-01'). Supports sideloading related resources (users, organizations, groups) via 'include'.")
-    public SearchResponse search(
+    public Mono<SearchResponse> search(
             @ToolArg(description = "Zendesk search query string") String query,
             @ToolArg(description = "Optional resources to sideload. E.g. 'users,organizations,groups' (auto-wrapped in tickets(...)) or explicit 'tickets(users,organizations)'") @Nullable String include,
             @ToolArg(description = "Maximum number of results to return (default 25)") @Nullable Integer maxResults
@@ -55,34 +56,45 @@ public class ZendeskSearchTools {
         accumulatedResponse.setOrganizations(new ArrayList<>());
         accumulatedResponse.setGroups(new ArrayList<>());
 
-        boolean hasMore = true;
-        int page = 1;
-        while (hasMore && accumulatedResponse.getResults().size() < limit) {
-            SearchResponse pageResponse = searchClient.list(query, resolvedInclude, null, null, page, 100).block();
-            if (isPageEmpty(pageResponse)) {
-                hasMore = false;
-            } else {
-                mergePageResults(accumulatedResponse, pageResponse);
-                hasMore = pageResponse.getNextPage() != null;
-                page++;
-            }
-        }
+        return fetchSearchPage(query, resolvedInclude, 1, limit, accumulatedResponse);
+    }
 
+    private Mono<SearchResponse> fetchSearchPage(
+            String query,
+            String resolvedInclude,
+            int page,
+            int limit,
+            SearchResponse accumulatedResponse
+    ) {
+        return searchClient.list(query, resolvedInclude, null, null, page, 100)
+                .flatMap(pageResponse -> {
+                    if (isPageEmpty(pageResponse)) {
+                        return Mono.just(finalizeResponse(accumulatedResponse, limit));
+                    }
+                    mergePageResults(accumulatedResponse, pageResponse);
+                    if (pageResponse.getNextPage() != null && accumulatedResponse.getResults().size() < limit) {
+                        return fetchSearchPage(query, resolvedInclude, page + 1, limit, accumulatedResponse);
+                    }
+                    return Mono.just(finalizeResponse(accumulatedResponse, limit));
+                })
+                .defaultIfEmpty(finalizeResponse(accumulatedResponse, limit));
+    }
+
+    private SearchResponse finalizeResponse(SearchResponse accumulatedResponse, int limit) {
         if (accumulatedResponse.getResults().size() > limit) {
             accumulatedResponse.setResults(accumulatedResponse.getResults().subList(0, limit));
         }
         accumulatedResponse.setCount(accumulatedResponse.getResults().size());
-
         return accumulatedResponse;
     }
 
     @Tool(description = "Get the count of search results matching a query in Zendesk")
-    public SearchResponse searchCount(
+    public Mono<SearchResponse> searchCount(
             @ToolArg(description = "Zendesk search query string, e.g. 'type:ticket status:open'") String query
     ) {
         validateSearchQuery(query);
         log.info("MCP Tool called: searchCount(query='{}')", query);
-        return searchClient.count(query).block();
+        return searchClient.count(query);
     }
 
     private boolean isPageEmpty(SearchResponse pageResponse) {

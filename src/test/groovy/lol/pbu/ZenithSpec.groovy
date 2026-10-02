@@ -32,7 +32,7 @@ class ZenithSpec extends Specification {
 
     void 'test zendesk tools against live instance'() {
         when:
-        def countResult = ticketTools.getTicketCount()
+        def countResult = ticketTools.getTicketCount().block()
 
         then:
         countResult != null
@@ -40,7 +40,7 @@ class ZenithSpec extends Specification {
         countResult.count.value != null
 
         when:
-        def ticketResult = ticketTools.getTicket(7L)
+        def ticketResult = ticketTools.getTicket(7L).block()
 
         then:
         ticketResult != null
@@ -50,7 +50,7 @@ class ZenithSpec extends Specification {
         !ticketResult.ticket.customFields.any { it == null }
 
         when:
-        def ticketsResult = ticketTools.getTickets([7L])
+        def ticketsResult = ticketTools.getTickets([7L]).block()
 
         then:
         ticketsResult != null
@@ -73,16 +73,16 @@ class ZenithSpec extends Specification {
         forms.ticket_forms != null
 
         when:
-        def customObjects = customObjectTools.listCustomObjects()
+        def customObjects = customObjectTools.listCustomObjects().block()
 
         then:
         customObjects != null
         customObjects.customObjects != null
 
         when:
-        def fields = ticketTools.listTicketFields()
+        def fields = ticketTools.listTicketFields().block()
         def firstFieldId = fields.ticketFields?.first()?.id
-        def field = firstFieldId != null ? ticketTools.getTicketField(firstFieldId) : null
+        def field = firstFieldId != null ? ticketTools.getTicketField(firstFieldId).block() : null
 
         then:
         firstFieldId == null || (field != null && field.ticketField != null)
@@ -90,7 +90,7 @@ class ZenithSpec extends Specification {
         when: "uploading a local file as an attachment"
         File tempFile = File.createTempFile("zenith-upload-test-", ".txt")
         tempFile.text = "Testing Zenith attachment upload from local file"
-        def uploadResp = ticketTools.uploadAttachment(tempFile.absolutePath, "zenith-test.txt")
+        def uploadResp = ticketTools.uploadAttachment(tempFile.absolutePath, "zenith-test.txt").block()
 
         then:
         uploadResp != null
@@ -100,7 +100,7 @@ class ZenithSpec extends Specification {
         uploadResp.upload.attachment.fileName == "zenith-test.txt"
 
         when: "batch updating tickets concurrently"
-        def batchResp = ticketTools.batchUpdateTickets([7L], "Batch concurrent update test", null, null, false, [uploadResp.upload.token], null, false, null, null, null, null, null, null)
+        def batchResp = ticketTools.batchUpdateTickets([7L], "Batch concurrent update test", null, null, false, [uploadResp.upload.token], null, false, null, null, null, null, null, null).block()
 
         then:
         batchResp != null
@@ -109,7 +109,7 @@ class ZenithSpec extends Specification {
         batchResp.results().first().success()
 
         when: "batch updating tickets asynchronously via Zendesk bulk job"
-        def asyncBulkResp = ticketTools.batchUpdateTickets([7L], "Batch bulk async test", null, null, false, null, null, true, null, null, null, null, null, null)
+        def asyncBulkResp = ticketTools.batchUpdateTickets([7L], "Batch bulk async test", null, null, false, null, null, true, null, null, null, null, null, null).block()
 
         then:
         asyncBulkResp != null
@@ -117,7 +117,7 @@ class ZenithSpec extends Specification {
         asyncBulkResp.jobStatus().id != null
 
         when: "fetching job status by id"
-        def jobStatusResp = ticketTools.getJobStatus(asyncBulkResp.jobStatus().id)
+        def jobStatusResp = ticketTools.getJobStatus(asyncBulkResp.jobStatus().id).block()
 
         then:
         jobStatusResp != null

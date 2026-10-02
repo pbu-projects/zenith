@@ -16,6 +16,7 @@ import lol.pbu.z4j.model.TicketForm;
 import lol.pbu.z4j.model.TicketFormResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -355,7 +356,7 @@ public class ZendeskMetadataTools {
     }
 
     @Tool(description = "Get details of a specific Zendesk ticket form by its numeric ID")
-    public TicketFormResponse getTicketForm(
+    public Mono<TicketFormResponse> getTicketForm(
             @ToolArg(description = "The numeric ticket form ID") Long ticketFormId
     ) {
         log.info("MCP Tool called: getTicketForm(id={})", ticketFormId);
@@ -363,7 +364,7 @@ public class ZendeskMetadataTools {
             throw new IllegalArgumentException(PARAM_TICKET_FORM_ID_CAMEL + " is required");
         }
         validateTicketFormBounds(ticketFormId);
-        return ticketFormsClient.showTicketForm(ticketFormId).block();
+        return ticketFormsClient.showTicketForm(ticketFormId);
     }
 
 

@@ -79,23 +79,28 @@ import spock.lang.Specification
 import spock.lang.TempDir
 import java.nio.file.Path
 
-class ToolsComposite {
-    @Delegate ZendeskTicketTools ticketTools
-    @Delegate ZendeskSearchTools searchTools
-    @Delegate ZendeskViewTools viewTools
-    @Delegate ZendeskHelpCenterTools helpCenterTools
-    @Delegate ZendeskCommunityTools communityTools
-    @Delegate ZendeskCustomObjectTools customObjectTools
-    @Delegate ZendeskMetadataTools metadataTools
+class ToolsComposite implements GroovyInterceptable {
+    ZendeskTicketTools ticketTools
+    ZendeskSearchTools searchTools
+    ZendeskViewTools viewTools
+    ZendeskHelpCenterTools helpCenterTools
+    ZendeskCommunityTools communityTools
+    ZendeskCustomObjectTools customObjectTools
+    ZendeskMetadataTools metadataTools
 
-    def methodMissing(String name, args) {
+    @Override
+    Object invokeMethod(String name, Object args) {
         def targets = [ticketTools, searchTools, viewTools, helpCenterTools, communityTools, customObjectTools, metadataTools]
         for (target in targets) {
             if (target == null) {
                 continue
             }
             try {
-                return target.invokeMethod(name, args)
+                def res = target.invokeMethod(name, args)
+                if (res instanceof Mono) {
+                    return res.block()
+                }
+                return res
             } catch (MissingMethodException _) {
                 // Expected when method is not declared on this delegate; try next delegate
             }

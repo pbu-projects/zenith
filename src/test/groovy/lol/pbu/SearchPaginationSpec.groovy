@@ -38,7 +38,7 @@ class SearchPaginationSpec extends Specification {
         searchClient.list("test", _, _, _, 2, 100) >> Mono.just(r2)
 
         when:
-        def res = zendeskTools.search("test", (String) null, 3)
+        def res = zendeskTools.search("test", (String) null, 3).block()
 
         then:
         res.results.size() == 3
@@ -54,7 +54,7 @@ class SearchPaginationSpec extends Specification {
         searchClient.list("test", _, _, _, 1, 100) >> Mono.just(r1)
 
         when:
-        def res = zendeskTools.search("test", (String) null, 2)
+        def res = zendeskTools.search("test", (String) null, 2).block()
 
         then:
         res.results.size() == 2

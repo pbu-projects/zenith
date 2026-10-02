@@ -19,6 +19,7 @@ import lol.pbu.z4j.model.CustomObjectsCreateRequest;
 import lol.pbu.z4j.model.CustomObjectsResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 import java.util.Collections;
 import java.util.Map;
@@ -77,24 +78,24 @@ public class ZendeskCustomObjectTools {
     }
 
     @Tool(description = "List all custom objects defined in Zendesk")
-    public CustomObjectsResponse listCustomObjects() {
+    public Mono<CustomObjectsResponse> listCustomObjects() {
         log.info("MCP Tool called: listCustomObjects()");
-        return customObjectsClient.listCustomObjects().block();
+        return customObjectsClient.listCustomObjects();
     }
 
     @Tool(description = "Get details and schema of a specific custom object by its key")
-    public CustomObjectResponse getCustomObject(
+    public Mono<CustomObjectResponse> getCustomObject(
             @ToolArg(description = "The key of the custom object") String customObjectKey
     ) {
         log.info("MCP Tool called: getCustomObject(key='{}')", customObjectKey);
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
-        return customObjectsClient.showCustomObject(customObjectKey).block();
+        return customObjectsClient.showCustomObject(customObjectKey);
     }
 
     @Tool(description = "Create a new custom object definition in Zendesk")
-    public CustomObjectResponse createCustomObject(
+    public Mono<CustomObjectResponse> createCustomObject(
             @ToolArg(description = "A unique key to identify the custom object (e.g. 'car', 'device')") @Nullable String key,
             @ToolArg(description = "Singular display title for the custom object (e.g. 'Car')") @Nullable String title,
             @ToolArg(description = "Plural display title for the custom object (e.g. 'Cars')") @Nullable String titlePluralized,
@@ -115,18 +116,18 @@ public class ZendeskCustomObjectTools {
             throw new IllegalArgumentException("titlePluralized is required when creating a custom object.");
         }
         CustomObjectsCreateRequest req = new CustomObjectsCreateRequest(obj);
-        return customObjectsClient.createCustomObject(req).block();
+        return customObjectsClient.createCustomObject(req);
     }
 
-    public CustomObjectResponse createCustomObject(CustomObjectsCreateRequest customObjectRequest) {
+    public Mono<CustomObjectResponse> createCustomObject(CustomObjectsCreateRequest customObjectRequest) {
         if (customObjectRequest == null || customObjectRequest.getCustomObject() == null) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_REQUIRED);
         }
-        return customObjectsClient.createCustomObject(customObjectRequest).block();
+        return customObjectsClient.createCustomObject(customObjectRequest);
     }
 
     @Tool(description = "Update an existing custom object definition in Zendesk by its key")
-    public CustomObjectResponse updateCustomObject(
+    public Mono<CustomObjectResponse> updateCustomObject(
             @ToolArg(description = "The key of the custom object to update") String customObjectKey,
             @ToolArg(description = "Updated singular display title for the custom object") @Nullable String title,
             @ToolArg(description = "Updated plural display title for the custom object") @Nullable String titlePluralized,
@@ -141,21 +142,21 @@ public class ZendeskCustomObjectTools {
         }
         CustomObject obj = resolveCustomObject(null, title, titlePluralized, description, customObject, request);
         CustomObjectsCreateRequest req = new CustomObjectsCreateRequest(obj);
-        return customObjectsClient.updateCustomObject(customObjectKey, req).block();
+        return customObjectsClient.updateCustomObject(customObjectKey, req);
     }
 
-    public CustomObjectResponse updateCustomObject(String customObjectKey, CustomObjectsCreateRequest customObjectRequest) {
+    public Mono<CustomObjectResponse> updateCustomObject(String customObjectKey, CustomObjectsCreateRequest customObjectRequest) {
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         if (customObjectRequest == null) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_REQUIRED);
         }
-        return customObjectsClient.updateCustomObject(customObjectKey, customObjectRequest).block();
+        return customObjectsClient.updateCustomObject(customObjectKey, customObjectRequest);
     }
 
     @Tool(description = "Delete a custom object definition from Zendesk by its key")
-    public Map<String, Object> deleteCustomObject(
+    public Mono<Map<String, Object>> deleteCustomObject(
             @ToolArg(description = "The key of the custom object to delete") String customObjectKey,
             @Nullable CallToolRequest request
     ) {
@@ -164,22 +165,22 @@ public class ZendeskCustomObjectTools {
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException("customObjectKey is required when deleting a custom object.");
         }
-        customObjectsClient.deleteCustomObject(customObjectKey).block();
-        return Map.of("success", true, "deletedCustomObjectKey", customObjectKey);
+        return customObjectsClient.deleteCustomObject(customObjectKey)
+                .thenReturn(Map.of("success", true, "deletedCustomObjectKey", customObjectKey));
     }
 
-    public Map<String, Object> deleteCustomObject(String customObjectKey) {
+    public Mono<Map<String, Object>> deleteCustomObject(String customObjectKey) {
         return deleteCustomObject(customObjectKey, null);
     }
 
     @Tool(description = "Get custom object limits for the Zendesk account")
-    public CustomObjectLimitsResponse getCustomObjectLimits() {
+    public Mono<CustomObjectLimitsResponse> getCustomObjectLimits() {
         log.info("MCP Tool called: getCustomObjectLimits()");
-        return customObjectsClient.customObjectsLimit().block();
+        return customObjectsClient.customObjectsLimit();
     }
 
     @Tool(description = "List records for a specific Zendesk custom object")
-    public CustomObjectRecordsResponse listCustomObjectRecords(
+    public Mono<CustomObjectRecordsResponse> listCustomObjectRecords(
             @ToolArg(description = "The key of the custom object") String customObjectKey,
             @ToolArg(description = "Optional comma-separated record IDs to filter by") @Nullable String filterIds,
             @ToolArg(description = "Optional comma-separated external IDs to filter by") @Nullable String filterExternalIds,
@@ -194,15 +195,15 @@ public class ZendeskCustomObjectTools {
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
-        return customObjectRecordsClient.listCustomObjectRecords(customObjectKey, filterIds, filterExternalIds, sort, pageBefore, pageAfter, pageSize).block();
+        return customObjectRecordsClient.listCustomObjectRecords(customObjectKey, filterIds, filterExternalIds, sort, pageBefore, pageAfter, pageSize);
     }
 
-    public CustomObjectRecordsResponse listCustomObjectRecords(String customObjectKey) {
+    public Mono<CustomObjectRecordsResponse> listCustomObjectRecords(String customObjectKey) {
         return listCustomObjectRecords(customObjectKey, null, null, null, null, null, null, null);
     }
 
     @Tool(description = "Get details of a specific custom object record by its ID")
-    public CustomObjectRecordResponse getCustomObjectRecord(
+    public Mono<CustomObjectRecordResponse> getCustomObjectRecord(
             @ToolArg(description = "The key of the custom object") String customObjectKey,
             @ToolArg(description = "The ID of the custom object record") String recordId
     ) {
@@ -213,11 +214,11 @@ public class ZendeskCustomObjectTools {
         if (recordId == null || recordId.isBlank()) {
             throw new IllegalArgumentException(MSG_RECORD_ID_REQUIRED);
         }
-        return customObjectRecordsClient.showCustomObjectRecord(customObjectKey, recordId).block();
+        return customObjectRecordsClient.showCustomObjectRecord(customObjectKey, recordId);
     }
 
     @Tool(description = "Create a new record for a Zendesk custom object")
-    public CustomObjectRecordResponse createCustomObjectRecord(
+    public Mono<CustomObjectRecordResponse> createCustomObjectRecord(
             @ToolArg(description = "The key of the custom object (e.g. 'car')") String customObjectKey,
             @ToolArg(description = "Optional name or title for the record") @Nullable String name,
             @ToolArg(description = "Optional key-value map of custom object field values") @Nullable Map<String, Object> customObjectFields,
@@ -232,21 +233,21 @@ public class ZendeskCustomObjectTools {
         }
         CustomObjectRecord recordObj = resolveCustomObjectRecord(name, customObjectFields, externalId, customObjectRecord, request);
         CustomObjectRecordsCreateRequest req = new CustomObjectRecordsCreateRequest(recordObj);
-        return customObjectRecordsClient.createCustomObjectRecord(customObjectKey, req).block();
+        return customObjectRecordsClient.createCustomObjectRecord(customObjectKey, req);
     }
 
-    public CustomObjectRecordResponse createCustomObjectRecord(String customObjectKey, CustomObjectRecordsCreateRequest createRequest) {
+    public Mono<CustomObjectRecordResponse> createCustomObjectRecord(String customObjectKey, CustomObjectRecordsCreateRequest createRequest) {
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         if (createRequest == null || createRequest.getCustomObjectRecord() == null) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_RECORD_REQUIRED);
         }
-        return customObjectRecordsClient.createCustomObjectRecord(customObjectKey, createRequest).block();
+        return customObjectRecordsClient.createCustomObjectRecord(customObjectKey, createRequest);
     }
 
     @Tool(description = "Update an existing custom object record by its custom object key and record ID")
-    public CustomObjectRecordResponse updateCustomObjectRecord(
+    public Mono<CustomObjectRecordResponse> updateCustomObjectRecord(
             @ToolArg(description = "The key of the custom object") String customObjectKey,
             @ToolArg(description = "The ID of the custom object record to update") String recordId,
             @ToolArg(description = "Optional updated name or title for the record") @Nullable String name,
@@ -265,10 +266,10 @@ public class ZendeskCustomObjectTools {
         }
         CustomObjectRecord recordObj = resolveCustomObjectRecord(name, customObjectFields, externalId, customObjectRecord, request);
         CustomObjectRecordsCreateRequest req = new CustomObjectRecordsCreateRequest(recordObj);
-        return customObjectRecordsClient.updateCustomObjectRecord(customObjectKey, recordId, req).block();
+        return customObjectRecordsClient.updateCustomObjectRecord(customObjectKey, recordId, req);
     }
 
-    public CustomObjectRecordResponse updateCustomObjectRecord(String customObjectKey, String recordId, CustomObjectRecordsCreateRequest updateRequest) {
+    public Mono<CustomObjectRecordResponse> updateCustomObjectRecord(String customObjectKey, String recordId, CustomObjectRecordsCreateRequest updateRequest) {
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
@@ -278,11 +279,11 @@ public class ZendeskCustomObjectTools {
         if (updateRequest == null) {
             throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_RECORD_REQUIRED);
         }
-        return customObjectRecordsClient.updateCustomObjectRecord(customObjectKey, recordId, updateRequest).block();
+        return customObjectRecordsClient.updateCustomObjectRecord(customObjectKey, recordId, updateRequest);
     }
 
     @Tool(description = "Delete a specific custom object record by custom object key and record ID")
-    public Map<String, Object> deleteCustomObjectRecord(
+    public Mono<Map<String, Object>> deleteCustomObjectRecord(
             @ToolArg(description = "The key of the custom object") String customObjectKey,
             @ToolArg(description = "The ID of the custom object record to delete") String recordId,
             @Nullable CallToolRequest request
@@ -295,16 +296,16 @@ public class ZendeskCustomObjectTools {
         if (recordId == null || recordId.isBlank()) {
             throw new IllegalArgumentException("recordId is required when deleting a custom object record.");
         }
-        customObjectRecordsClient.deleteCustomObjectRecord(customObjectKey, recordId).block();
-        return Map.of("success", true, PARAM_CUSTOM_OBJECT_KEY, customObjectKey, "deletedRecordId", recordId);
+        return customObjectRecordsClient.deleteCustomObjectRecord(customObjectKey, recordId)
+                .thenReturn(Map.of("success", true, PARAM_CUSTOM_OBJECT_KEY, customObjectKey, "deletedRecordId", recordId));
     }
 
-    public Map<String, Object> deleteCustomObjectRecord(String customObjectKey, String recordId) {
+    public Mono<Map<String, Object>> deleteCustomObjectRecord(String customObjectKey, String recordId) {
         return deleteCustomObjectRecord(customObjectKey, recordId, null);
     }
 
     @Tool(description = "Search records for a specific Zendesk custom object matching query text")
-    public CustomObjectRecordsResponse searchCustomObjectRecords(
+    public Mono<CustomObjectRecordsResponse> searchCustomObjectRecords(
             @ToolArg(description = "The key of the custom object") String customObjectKey,
             @ToolArg(description = "Search query string") String query,
             @ToolArg(description = "Optional sort parameter") @Nullable String sort,
@@ -321,10 +322,10 @@ public class ZendeskCustomObjectTools {
         if (query == null || query.isBlank()) {
             throw new IllegalArgumentException("query is required");
         }
-        return customObjectRecordsClient.searchCustomObjectRecords(customObjectKey, query, sort, pageBefore, pageAfter, pageSize).block();
+        return customObjectRecordsClient.searchCustomObjectRecords(customObjectKey, query, sort, pageBefore, pageAfter, pageSize);
     }
 
-    public CustomObjectRecordsResponse searchCustomObjectRecords(String customObjectKey, String query) {
+    public Mono<CustomObjectRecordsResponse> searchCustomObjectRecords(String customObjectKey, String query) {
         return searchCustomObjectRecords(customObjectKey, query, null, null, null, null, null);
     }
 
