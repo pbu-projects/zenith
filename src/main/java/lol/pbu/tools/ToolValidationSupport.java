@@ -118,11 +118,9 @@ public final class ToolValidationSupport {
             case Object[] arr -> Arrays.asList(arr);
             default -> throw new IllegalArgumentException(camelKey + " must be a list of strings, got: " + raw.getClass().getSimpleName());
         };
-        List<String> validated = new ArrayList<>(items.size());
-        for (Object item : items) {
-            validated.add(validateTagItem(item, camelKey));
-        }
-        return validated;
+        return items.stream()
+                .map(item -> validateTagItem(item, camelKey))
+                .toList();
     }
 
     private static Object extractRawTags(
