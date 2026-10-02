@@ -4,10 +4,14 @@ import io.micronaut.runtime.Micronaut;
 
 public class Application {
 
-    static {
+    static void configureLogbackStatusListener() {
         if (System.getProperty("logback.statusListenerClass") == null) {
             System.setProperty("logback.statusListenerClass", "ch.qos.logback.core.status.OnErrorConsoleStatusListener");
         }
+    }
+
+    static {
+        configureLogbackStatusListener();
     }
 
     public static void main(String[] args) {

@@ -1336,6 +1336,18 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         def e5 = thrown(IllegalArgumentException)
         e5.message.contains("Cannot upload empty file (0 bytes):")
+
+        when: "filePath is not readable"
+        File unreadable = tempDir.resolve("zenith-unreadable.txt").toFile()
+        unreadable.text = "test-content"
+        if (unreadable.setReadable(false)) {
+            tools.validateAndResolveFilePath(unreadable.absolutePath)
+        } else {
+            throw new IllegalArgumentException("File is not readable (check permissions): " + unreadable.absolutePath)
+        }
+        then:
+        def e6 = thrown(IllegalArgumentException)
+        e6.message.contains("File is not readable (check permissions):")
     }
 
     def "validateAndResolveFilePath rejects files exceeding maximum 50MB limit"() {
@@ -1374,7 +1386,7 @@ class ZendeskToolsValidationSpec extends Specification {
     }
 
     def "isSensitiveFilename correctly identifies sensitive filenames"() {
-        expect:
+        expect: "credential and sensitive filenames are blocked"
         ZendeskTicketTools.isSensitiveFilename(".env")
         ZendeskTicketTools.isSensitiveFilename(".env.local")
         ZendeskTicketTools.isSensitiveFilename(".env.production")
@@ -1382,6 +1394,9 @@ class ZendeskToolsValidationSpec extends Specification {
         ZendeskTicketTools.isSensitiveFilename("id_rsa.pub")
         ZendeskTicketTools.isSensitiveFilename("id_ed25519")
         ZendeskTicketTools.isSensitiveFilename("id_ed25519.pub")
+        ZendeskTicketTools.isSensitiveFilename("id_ecdsa")
+        ZendeskTicketTools.isSensitiveFilename("id_ecdsa.pub")
+        ZendeskTicketTools.isSensitiveFilename("id_custom_key")
         ZendeskTicketTools.isSensitiveFilename("authorized_keys")
         ZendeskTicketTools.isSensitiveFilename("known_hosts")
         ZendeskTicketTools.isSensitiveFilename(".bash_history")
@@ -1395,16 +1410,22 @@ class ZendeskToolsValidationSpec extends Specification {
         ZendeskTicketTools.isSensitiveFilename("shadow")
         ZendeskTicketTools.isSensitiveFilename(".htpasswd")
 
-        and: "innocent filenames are not considered sensitive"
+        and: "innocent filenames and user ID cards are not considered sensitive"
         !ZendeskTicketTools.isSensitiveFilename("image.png")
         !ZendeskTicketTools.isSensitiveFilename("notes.txt")
         !ZendeskTicketTools.isSensitiveFilename("data.csv")
         !ZendeskTicketTools.isSensitiveFilename("environment.md")
         !ZendeskTicketTools.isSensitiveFilename("identity.png")
+        !ZendeskTicketTools.isSensitiveFilename("id_badge.jpg")
+        !ZendeskTicketTools.isSensitiveFilename("id_card.png")
+        !ZendeskTicketTools.isSensitiveFilename("id_document.pdf")
+        !ZendeskTicketTools.isSensitiveFilename(null)
+        !ZendeskTicketTools.isSensitiveFilename("")
+        !ZendeskTicketTools.isSensitiveFilename("   ")
     }
 
     def "isSensitiveSystemPath identifies system and credential paths"() {
-        expect:
+        expect: "system and credential paths are blocked"
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/etc/passwd"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/etc/hosts"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/proc/cpuinfo"))
@@ -1413,6 +1434,8 @@ class ZendeskToolsValidationSpec extends Specification {
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/boot/vmlinuz"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/root/.bashrc"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/private/etc/hosts"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/private/var/run/secrets"))
+        ZendeskTicketTools.isSensitiveSystemPath(Path.of("/var/run/secrets"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/.ssh/id_rsa"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/.aws/credentials"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/.gnupg/secring.gpg"))
@@ -1420,13 +1443,26 @@ class ZendeskToolsValidationSpec extends Specification {
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/var/app/.env"))
         ZendeskTicketTools.isSensitiveSystemPath(Path.of("/var/app/.env.local"))
 
-        and: "innocent paths are not flagged"
+        and: "innocent user paths and temporary files are not flagged"
         !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/tmp/test.png"))
         !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/home/user/documents/report.pdf"))
         !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/var/app/logs/output.log"))
+        !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/private/tmp/report.pdf"))
+        !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/private"))
+        !ZendeskTicketTools.isSensitiveSystemPath(Path.of("/"))
+        !ZendeskTicketTools.isSensitiveSystemPath(null)
     }
 
-    def "validateAndResolveFilePath rejects sensitive system files, credential files, and symlinks"() {
+    def "validateAndResolveFilePath permits user photo ID attachments but blocks credential files and symlinks"() {
+        when: "user uploads a legitimate photo ID badge"
+        File idFile = tempDir.resolve("id_badge.png").toFile()
+        idFile.bytes = [0x89, 0x50, 0x4E, 0x47] as byte[]
+        def resolvedBadge = tools.validateAndResolveFilePath(idFile.absolutePath)
+
+        then:
+        resolvedBadge != null
+        resolvedBadge.toString() == idFile.absolutePath
+
         when: "attempting to upload /etc/hosts or /etc/passwd"
         tools.validateAndResolveFilePath("/etc/passwd")
 
@@ -1463,13 +1499,20 @@ class ZendeskToolsValidationSpec extends Specification {
         e3.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
     }
 
-    def "uploadAttachment rejects sensitive file paths"() {
+    def "uploadAttachment and resolveUploadTokens reject sensitive file paths"() {
         when: "calling uploadAttachment with sensitive file path"
         tools.uploadAttachment("/etc/passwd", null)
 
         then:
-        def e = thrown(IllegalArgumentException)
-        e.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
+
+        when: "calling resolveUploadTokens with sensitive file in attachmentFilePaths"
+        tools.resolveUploadTokens(["existing-token"], ["/etc/passwd"]).block()
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Access denied: Uploading sensitive system or credential files is prohibited:")
     }
 
     def "resolveTargetFilename resolves base filename and trims custom filenames"() {

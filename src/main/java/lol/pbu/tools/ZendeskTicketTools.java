@@ -878,7 +878,7 @@ public class ZendeskTicketTools {
     public static final long MAX_ATTACHMENT_SIZE_BYTES = 50L * 1024 * 1024; // 50MB
 
     static final Set<String> SENSITIVE_ROOT_DIRS = Set.of(
-            "etc", "proc", "sys", "dev", "boot", "root", "windows", "winnt"
+            "etc", "proc", "sys", "dev", "boot", "root", "run", "windows", "winnt"
     );
 
     static final Set<String> SENSITIVE_DIR_NAMES = Set.of(
@@ -918,7 +918,7 @@ public class ZendeskTicketTools {
         }
         Path normalized = path.toAbsolutePath().normalize();
 
-        // Check root-level directory or /private/etc, /private/var on macOS
+        // Check root-level directory or /private/etc, /var/run, /private/var/run (runtime secrets)
         if (normalized.getNameCount() > 0) {
             String firstElement = normalized.getName(0).toString().toLowerCase();
             if (SENSITIVE_ROOT_DIRS.contains(firstElement)) {
@@ -929,6 +929,12 @@ public class ZendeskTicketTools {
                 if (SENSITIVE_ROOT_DIRS.contains(secondElement)) {
                     return true;
                 }
+                if (normalized.getNameCount() > 2 && "var".equals(secondElement) && "run".equals(normalized.getName(2).toString().toLowerCase())) {
+                    return true;
+                }
+            }
+            if (normalized.getNameCount() > 1 && "var".equals(firstElement) && "run".equals(normalized.getName(1).toString().toLowerCase())) {
+                return true;
             }
         }
 
