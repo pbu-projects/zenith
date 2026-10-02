@@ -342,30 +342,30 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "successfully executes Help Center, Views, Translations, and Community tools happy paths"() {
         given:
-        articleClient.createArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
-        articleClient.updateArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
-        articleClient.deleteArticle(*_) >> reactor.core.publisher.Mono.empty()
-        articleClient.listArticles(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticlesResponse())
-        articleClient.showArticle(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ArticleResponse())
-        viewClient.listViews() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewsResponse())
-        viewClient.listActiveViews() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewsResponse())
-        viewClient.listTicketsForView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TicketsResponse())
-        viewClient.showView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewResponse())
-        viewClient.executeView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewExecuteResponse())
-        viewClient.countView(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.ViewCountResponse())
-        translationClient.listTranslations(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TranslationsResponse())
-        translationClient.showTranslation(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TranslationResponse())
-        categoryClient.listCategories(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
-        categoryClient.listCategoriesNoLocale(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
-        categoryClient.showCategory(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoryResponse())
-        categoryClient.showCategoryNoLocale(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CategoryResponse())
-        topicClient.showTopic(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TopicResponse())
-        topicClient.listTopics() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.TopicsResponse())
-        postClient.showPost(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostResponse())
-        postClient.listPosts() >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostsResponse())
-        postClient.listPostsByTopic(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostsResponse())
-        postClient.searchPosts(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.CommunityPostSearchResponse())
-        postClient.listPostComments(*_) >> reactor.core.publisher.Mono.just(new lol.pbu.z4j.model.PostCommentsResponse())
+        articleClient.createArticle(*_) >> Mono.just(new lol.pbu.z4j.model.ArticleResponse())
+        articleClient.updateArticle(*_) >> Mono.just(new lol.pbu.z4j.model.ArticleResponse())
+        articleClient.deleteArticle(*_) >> Mono.empty()
+        articleClient.listArticles(*_) >> Mono.just(new lol.pbu.z4j.model.ArticlesResponse())
+        articleClient.showArticle(*_) >> Mono.just(new lol.pbu.z4j.model.ArticleResponse())
+        viewClient.listViews() >> Mono.just(new lol.pbu.z4j.model.ViewsResponse())
+        viewClient.listActiveViews() >> Mono.just(new lol.pbu.z4j.model.ViewsResponse())
+        viewClient.listTicketsForView(*_) >> Mono.just(new lol.pbu.z4j.model.TicketsResponse())
+        viewClient.showView(*_) >> Mono.just(new lol.pbu.z4j.model.ViewResponse())
+        viewClient.executeView(*_) >> Mono.just(new lol.pbu.z4j.model.ViewExecuteResponse())
+        viewClient.countView(*_) >> Mono.just(new lol.pbu.z4j.model.ViewCountResponse())
+        translationClient.listTranslations(*_) >> Mono.just(new lol.pbu.z4j.model.TranslationsResponse())
+        translationClient.showTranslation(*_) >> Mono.just(new lol.pbu.z4j.model.TranslationResponse())
+        categoryClient.listCategories(*_) >> Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
+        categoryClient.listCategoriesNoLocale(*_) >> Mono.just(new lol.pbu.z4j.model.CategoriesResponse())
+        categoryClient.showCategory(*_) >> Mono.just(new lol.pbu.z4j.model.CategoryResponse())
+        categoryClient.showCategoryNoLocale(*_) >> Mono.just(new lol.pbu.z4j.model.CategoryResponse())
+        topicClient.showTopic(*_) >> Mono.just(new lol.pbu.z4j.model.TopicResponse())
+        topicClient.listTopics() >> Mono.just(new lol.pbu.z4j.model.TopicsResponse())
+        postClient.showPost(*_) >> Mono.just(new lol.pbu.z4j.model.PostResponse())
+        postClient.listPosts() >> Mono.just(new lol.pbu.z4j.model.PostsResponse())
+        postClient.listPostsByTopic(*_) >> Mono.just(new lol.pbu.z4j.model.PostsResponse())
+        postClient.searchPosts(*_) >> Mono.just(new lol.pbu.z4j.model.CommunityPostSearchResponse())
+        postClient.listPostComments(*_) >> Mono.just(new lol.pbu.z4j.model.PostCommentsResponse())
 
         expect:
         tools.createArticle(1L, "Title", "<p>Body</p>", 2L, "en-us", false, ["label1"], 3L) != null
@@ -423,11 +423,11 @@ class ZendeskToolsValidationSpec extends Specification {
 
         when: "response is null or empty"
         ticketFormsClient.listTicketForms() >>> [
-                reactor.core.publisher.Mono.empty(),
-                reactor.core.publisher.Mono.just(emptyResponse),
-                reactor.core.publisher.Mono.just(responseWithForms),
-                reactor.core.publisher.Mono.just(responseWithForms),
-                reactor.core.publisher.Mono.just(responseWithForms)
+                Mono.empty(),
+                Mono.just(emptyResponse),
+                Mono.just(responseWithForms),
+                Mono.just(responseWithForms),
+                Mono.just(responseWithForms)
         ]
 
         def rNull = tools.listTicketForms()
@@ -475,7 +475,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketCreateRequest capturedReq = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketResponse())
+            Mono.just(new TicketResponse())
         }
 
         def customFieldsInput = [
@@ -547,7 +547,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketCreateRequest capturedReq = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketResponse())
+            Mono.just(new TicketResponse())
         }
         def request = new CallToolRequest("createTicket", [
                 subject: "Test Subject",
@@ -574,7 +574,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketCreateRequest capturedReq = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketResponse())
+            Mono.just(new TicketResponse())
         }
 
         when:
@@ -594,7 +594,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketCreateRequest capturedReq = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketResponse())
+            Mono.just(new TicketResponse())
         }
 
         when:
@@ -666,7 +666,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketUpdateRequest capturedReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            Mono.just(new TicketUpdateResponse())
         }
 
         when:
@@ -684,7 +684,7 @@ class ZendeskToolsValidationSpec extends Specification {
     def "updateTicket sets type on TicketUpdateInput"() {
         given:
         TicketUpdateRequest capturedReq = null
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(100L).tap {
                 type = TicketType.TASK
                 hasIncidents = false
@@ -692,7 +692,7 @@ class ZendeskToolsValidationSpec extends Specification {
         })
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            Mono.just(new TicketUpdateResponse())
         }
 
         when:
@@ -733,7 +733,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket rejects type conversion on a problem parent with linked incidents"() {
         given:
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(100L).tap {
                 id = 100L
                 type = TicketType.PROBLEM
@@ -760,7 +760,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketUpdateRequest capturedReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+            Mono.just(new TicketUpdateResponse().tap {
                 ticket = new Ticket(100L)
             })
         }
@@ -787,7 +787,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketUpdateRequest capturedReq = null
         ticketClient.updateManyTickets("100,101", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+            Mono.just(new JobStatusResponse().tap {
                 jobStatus = new JobStatus().tap { id = "job-456" }
             })
         }
@@ -828,17 +828,17 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketCreateRequest capturedCreate = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedCreate = req
-            return reactor.core.publisher.Mono.just(new TicketResponse())
+            return Mono.just(new TicketResponse())
         }
         TicketUpdateRequest capturedUpdate = null
         ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedUpdate = req
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
         TicketUpdateRequest capturedBatch = null
         ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
             capturedBatch = req
-            return reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+            return Mono.just(new JobStatusResponse().tap {
                 jobStatus = new JobStatus().tap { id = "bulk-job-1" }
             })
         }
@@ -931,7 +931,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketCreateRequest capturedReq = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketResponse())
+            Mono.just(new TicketResponse())
         }
 
         when:
@@ -973,7 +973,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "batchUpdateTickets rejects type conversion on a problem parent with linked incidents"() {
         given:
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(100L).tap {
                 id = 100L
                 type = TicketType.PROBLEM
@@ -999,9 +999,9 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "overloaded tool methods execute and delegate correctly"() {
         given:
-        ticketClient.createTicket(_ as TicketCreateRequest) >> reactor.core.publisher.Mono.just(new TicketResponse())
-        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse())
-        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+        ticketClient.createTicket(_ as TicketCreateRequest) >> Mono.just(new TicketResponse())
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> Mono.just(new TicketUpdateResponse())
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> Mono.just(new JobStatusResponse().tap {
             jobStatus = new JobStatus().tap { id = "job-1" }
         })
 
@@ -1042,13 +1042,13 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         TicketUpdateRequest capturedAsyncReq = null
         TicketUpdateRequest capturedConcReq = null
-        ticketClient.showTicket(200L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(200L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(200L).tap {
                 id = 200L
                 type = TicketType.PROBLEM
             }
         })
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(100L).tap {
                 id = 100L
                 type = TicketType.INCIDENT
@@ -1056,13 +1056,13 @@ class ZendeskToolsValidationSpec extends Specification {
         })
         ticketClient.updateManyTickets("100", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
             capturedAsyncReq = req
-            reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+            Mono.just(new JobStatusResponse().tap {
                 jobStatus = new JobStatus().tap { id = "job-p1" }
             })
         }
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedConcReq = req
-            reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+            Mono.just(new TicketUpdateResponse().tap {
                 ticket = new Ticket(100L)
             })
         }
@@ -1094,12 +1094,12 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketUpdateRequest capturedReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+            Mono.just(new TicketUpdateResponse().tap {
                 ticket = new Ticket(100L)
             })
         }
         ticketClient.updateTicket(101L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
-            reactor.core.publisher.Mono.error(new RuntimeException("Simulated API failure"))
+            Mono.error(new RuntimeException("Simulated API failure"))
         }
 
         when: "updating with convertToIncident=true and type=null, with one ticket failing"
@@ -1115,13 +1115,13 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "validateProblemTarget throws on non-problem or retrieval failure"() {
         given:
-        ticketClient.showTicket(300L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(300L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(300L).tap {
                 id = 300L
                 type = TicketType.TASK
             }
         })
-        ticketClient.showTicket(400L) >> reactor.core.publisher.Mono.error(new RuntimeException("Not found"))
+        ticketClient.showTicket(400L) >> Mono.error(new RuntimeException("Not found"))
 
         when: "target is not a problem ticket"
         tools.updateTicket(100L, null, null, null, null, null, null, 300L, true, null, null, null, null)
@@ -1141,19 +1141,19 @@ class ZendeskToolsValidationSpec extends Specification {
     def "validateProblemTarget allows problemId exceeding 32-bit integer range"() {
         given:
         Long bigProblemId = ((Long) Integer.MAX_VALUE) + 1L
-        ticketClient.showTicket(bigProblemId) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(bigProblemId) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket().tap {
                 id = bigProblemId
                 type = TicketType.PROBLEM
             }
         })
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket().tap {
                 id = 100L
                 type = TicketType.INCIDENT
             }
         })
-        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> Mono.just(new TicketUpdateResponse())
 
         when: "problemId exceeds Integer.MAX_VALUE in updateTicket"
         tools.updateTicket(100L, null, null, null, null, null, null, bigProblemId, true, null, null, null, null)
@@ -1237,21 +1237,21 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "concurrent batchUpdateTickets isolates ticket validation failure and allows other tickets to succeed"() {
         given:
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(100L).tap {
                 id = 100L
                 type = TicketType.PROBLEM
                 hasIncidents = true
             }
         })
-        ticketClient.showTicket(101L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        ticketClient.showTicket(101L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket(101L).tap {
                 id = 101L
                 type = TicketType.QUESTION
                 hasIncidents = false
             }
         })
-        ticketClient.updateTicket(101L, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap {
+        ticketClient.updateTicket(101L, _ as TicketUpdateRequest) >> Mono.just(new TicketUpdateResponse().tap {
             ticket = new Ticket(101L).tap {
                 id = 101L
                 type = TicketType.TASK
@@ -1410,7 +1410,7 @@ class ZendeskToolsValidationSpec extends Specification {
                 token = "mock-upload-token-123"
             }
         }
-        attachmentClient.uploadAttachment("custom.txt", "text/plain", _ as byte[]) >> reactor.core.publisher.Mono.just(mockResp)
+        attachmentClient.uploadAttachment("custom.txt", "text/plain", _ as byte[]) >> Mono.just(mockResp)
 
         when: "calling uploadAttachment with valid file and custom filename"
         def resp = tools.uploadAttachment(tempFile.absolutePath, "custom.txt")
@@ -1437,7 +1437,7 @@ class ZendeskToolsValidationSpec extends Specification {
         def httpResponse = io.micronaut.http.HttpResponse.status(io.micronaut.http.HttpStatus.UNPROCESSABLE_ENTITY)
                 .body('{"error":"RecordInvalid","description":"The file type and file extension do not match."}')
         def httpEx = new io.micronaut.http.client.exceptions.HttpClientResponseException("Unprocessable Entity", httpResponse)
-        attachmentClient.uploadAttachment(*_) >> reactor.core.publisher.Mono.error(httpEx)
+        attachmentClient.uploadAttachment(*_) >> Mono.error(httpEx)
 
         when:
         tools.uploadAttachment(tempFile.absolutePath, null)
@@ -1456,7 +1456,7 @@ class ZendeskToolsValidationSpec extends Specification {
                 token = "resolved-token-xyz"
             }
         }
-        attachmentClient.uploadAttachment(*_) >> reactor.core.publisher.Mono.just(mockResp)
+        attachmentClient.uploadAttachment(*_) >> Mono.just(mockResp)
 
         when:
         def tokens = tools.resolveUploadTokens(["existing-token-abc"], [tempFile.absolutePath])
@@ -1505,7 +1505,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomStatuses returns compact active-only summary by default to minimize tokens"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
 
         when: "calling default listCustomStatuses without args"
         def result = tools.listCustomStatuses()
@@ -1529,7 +1529,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomStatuses with includeInactive returns inactive statuses"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
 
         when:
         def result = tools.listCustomStatuses(null, true, false)
@@ -1542,7 +1542,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomStatuses with statusCategory filters by category"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
 
         when:
         def result = tools.listCustomStatuses("pending", false, false)
@@ -1556,7 +1556,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomStatuses with fullPayload returns full model objects"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
 
         when:
         def result = tools.listCustomStatuses(null, false, true)
@@ -1586,11 +1586,11 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket sets customStatusId and status when both are provided with matching category"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
         TicketUpdateRequest capturedReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
 
         when:
@@ -1604,11 +1604,11 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket accepts custom_status_id in snake_case via CallToolRequest"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
         TicketUpdateRequest capturedReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
         def request = new CallToolRequest("updateTicket", [custom_status_id: 101L])
 
@@ -1622,8 +1622,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket validates category match against current ticket when status is omitted"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket().tap {
                 id = 100L
                 status = TicketStatus.OPEN
@@ -1632,7 +1632,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketUpdateRequest capturedReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
 
         when: "customStatusId has category 'open' matching current ticket status"
@@ -1645,7 +1645,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket throws actionable error when status category mismatches provided status"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
 
         when: "customStatusId 101 has category 'open' but status is 'pending'"
         tools.updateTicket(100L, null, "pending", null, null, null, null, null, null, null, null, null, 101L, null)
@@ -1659,8 +1659,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket throws actionable error when category mismatches current ticket and status is omitted"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket().tap {
                 id = 100L
                 status = TicketStatus.OPEN
@@ -1678,7 +1678,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket throws error on inactive or non-existent customStatusId"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
 
         when: "customStatusId 103 is inactive"
         tools.updateTicket(100L, null, "hold", null, null, null, null, null, null, null, null, null, 103L, null)
@@ -1710,20 +1710,59 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then: "bounds check passes without throwing 32-bit exception"
         notThrown(IllegalArgumentException)
+
+        when: "calling updateTicket with 64-bit customStatusId"
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse([
+            new TicketFieldCustomStatusObject().tap {
+                id = 1000000000002L
+                agentLabel = "64-bit In Progress"
+                statusCategory = TicketFieldCustomStatusObjectStatusCategory.OPEN
+                active = true
+                isDefault = false
+            }
+        ]))
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
+            ticket = new Ticket().tap {
+                id = 100L
+                status = TicketStatus.OPEN
+            }
+        })
+        TicketUpdateRequest capturedUpdate = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedUpdate = req
+            Mono.just(new TicketUpdateResponse())
+        }
+        tools.updateTicket(100L, "Updating with 64-bit status", "open", "normal", true, null, null, null, null, null, null, null, 1000000000002L, null, null)
+
+        then:
+        capturedUpdate != null
+        capturedUpdate.ticket.customStatusId == 1000000000002L
+
+        when: "creating a ticket with 64-bit customStatusId"
+        TicketCreateRequest capturedCreate = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedCreate = req
+            Mono.just(new TicketResponse())
+        }
+        tools.createTicket("64-bit Ticket", "Comment", true, "normal", null, null, null, null, null, null, 1000000000002L, null)
+
+        then:
+        capturedCreate != null
+        capturedCreate.ticket.customStatusId == 1000000000002L
     }
 
     def "batchUpdateTickets updates tickets with customStatusId in concurrent and bulk modes"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
         List<TicketUpdateRequest> immediateReqs = []
         ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             immediateReqs.add(req)
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
         TicketUpdateRequest bulkReq = null
         ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
             bulkReq = req
-            return reactor.core.publisher.Mono.just(new JobStatusResponse().tap {
+            return Mono.just(new JobStatusResponse().tap {
                 jobStatus = new JobStatus().tap { id = "bulk-job-1" }
             })
         }
@@ -1750,11 +1789,11 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "createTicket sets customStatusId on TicketCreateInput"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
         TicketCreateRequest capturedReq = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new TicketResponse())
+            return Mono.just(new TicketResponse())
         }
 
         when:
@@ -1768,8 +1807,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "custom statuses are cached and do not re-fetch from client within TTL"() {
         given:
-        1 * customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+        1 * customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> Mono.just(new TicketUpdateResponse())
 
         when: "multiple calls are made that require custom status lookup"
         def r1 = tools.listCustomStatuses()
@@ -1784,7 +1823,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "clearCustomStatusCache forces a re-fetch of custom statuses"() {
         given:
-        2 * customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        2 * customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
 
         when: "calling listCustomStatuses, clearing cache, and calling again"
         def r1 = tools.listCustomStatuses()
@@ -1798,11 +1837,11 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "stale cache is used if subsequent fetch fails"() {
         given: "initial successful fetch populates cache"
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
         tools.listCustomStatuses()
 
         and: "subsequent fetch fails with an exception"
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.error(new RuntimeException("Zendesk 503 Service Unavailable"))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.error(new RuntimeException("Zendesk 503 Service Unavailable"))
 
         when: "force refreshing when client errors"
         def cachedResult = tools.getCachedCustomStatuses(true)
@@ -1822,8 +1861,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomStatuses and listStatusCategories return status_categories grouped response with form context"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
 
         when: "calling listCustomStatuses"
         def result = tools.listCustomStatuses()
@@ -1858,8 +1897,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomStatuses with ticketFormId filters by form and preserves category defaults"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
 
         when: "filtering by ticketFormId 1002"
         def result = tools.listCustomStatuses(null, 1002L, false, false)
@@ -1882,9 +1921,9 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket throws actionable error when customStatusId is not allowed on ticket's form"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket().tap {
                 id = 100L
                 status = TicketStatus.PENDING
@@ -1902,9 +1941,9 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket succeeds when customStatusId matches ticket form"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
-        ticketClient.showTicket(100L) >> reactor.core.publisher.Mono.just(new TicketResponse().tap {
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse().tap {
             ticket = new Ticket().tap {
                 id = 100L
                 status = TicketStatus.OPEN
@@ -1914,7 +1953,7 @@ class ZendeskToolsValidationSpec extends Specification {
         TicketUpdateRequest captured = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             captured = req
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
 
         when: "customStatusId 101 is allowed on form 1002"
@@ -1927,12 +1966,12 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "createTicket validates customStatusId against ticket_form_id"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
         TicketCreateRequest captured = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             captured = req
-            return reactor.core.publisher.Mono.just(new TicketResponse())
+            return Mono.just(new TicketResponse())
         }
 
         when: "creating ticket with form 1002 and customStatusId 102 (which is only on 1001)"
@@ -1969,8 +2008,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "ticket form status cache is refreshed after clearCustomStatusCache"() {
         given:
-        2 * customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        2 * customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        2 * customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        2 * customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
 
         when: "calling listCustomStatuses twice with clearCustomStatusCache in between"
         tools.listCustomStatuses()
@@ -2009,11 +2048,11 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket sets ticketFormId on TicketUpdateInputWithForm"() {
         given:
-        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
         TicketUpdateRequest capturedReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
 
         when: "calling updateTicket with ticketFormId"
@@ -2037,7 +2076,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket validates ticketFormId bounds and active status"() {
         given:
-        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
 
         when: "ticketFormId is non-positive"
         tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, null, -5L, null)
@@ -2063,16 +2102,16 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "batchUpdateTickets sets ticketFormId in concurrent and bulk modes"() {
         given:
-        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
         TicketUpdateRequest capturedConcurrentReq = null
         ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             capturedConcurrentReq = req
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse())
+            return Mono.just(new TicketUpdateResponse())
         }
         TicketUpdateRequest capturedBulkReq = null
         ticketClient.updateManyTickets("100", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
             capturedBulkReq = req
-            return reactor.core.publisher.Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-form-1" }))
+            return Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-form-1" }))
         }
 
         when: "running concurrent batch update with ticketFormId"
@@ -2094,7 +2133,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "ticket forms are cached and refreshed via clearTicketFormCache and clearAllCaches"() {
         given:
-        2 * ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        2 * ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
 
         when: "calling listTicketForms multiple times without cache clearing"
         tools.clearTicketFormCache()
@@ -2121,9 +2160,9 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "updateTicket using TicketMutationOptions builder updates ticket fields, form, and custom status"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
-        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
 
         TicketUpdateRequest capturedReq = null
         1 * ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long ticketIdArg, TicketUpdateRequest req ->
@@ -2133,7 +2172,7 @@ class ZendeskToolsValidationSpec extends Specification {
             t.setStatus(TicketStatus.OPEN)
             def resp = new TicketUpdateResponse()
             resp.setTicket(t)
-            return reactor.core.publisher.Mono.just(resp)
+            return Mono.just(resp)
         }
 
         def options = TicketMutationOptions.builder()
@@ -2162,9 +2201,9 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "batchUpdateTickets using TicketMutationOptions builder updates multiple tickets"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
-        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
 
         List<TicketUpdateRequest> capturedRequests = []
         2 * ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long ticketIdArg, TicketUpdateRequest req ->
@@ -2174,7 +2213,7 @@ class ZendeskToolsValidationSpec extends Specification {
             t.setStatus(TicketStatus.OPEN)
             def resp = new TicketUpdateResponse()
             resp.setTicket(t)
-            return reactor.core.publisher.Mono.just(resp)
+            return Mono.just(resp)
         }
 
         def options = TicketMutationOptions.builder()
@@ -2210,7 +2249,7 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "getTicketForm validates input and delegates to ticketFormsClient"() {
         given:
-        1 * ticketFormsClient.showTicketForm(1001L) >> reactor.core.publisher.Mono.just(new TicketFormResponse().tap {
+        1 * ticketFormsClient.showTicketForm(1001L) >> Mono.just(new TicketFormResponse().tap {
             ticketForm = new TicketForm().tap {
                 id = 1001L
                 name = "Standard Form"
@@ -2265,11 +2304,11 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         1 * ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             def t = new Ticket().tap { it.id = id }
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+            return Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
         }
         1 * ticketClient.updateTicket(101L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             def t = new Ticket().tap { it.id = id }
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+            return Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
         }
 
         when: "updateTicket with null options"
@@ -2289,7 +2328,7 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         1 * ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             def t = new Ticket().tap { it.id = id }
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+            return Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
         }
 
         when:
@@ -2302,13 +2341,13 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "CallToolRequest string coercions and errors for custom_status_id and ticket_form_id"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
-        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
 
         ticketClient.updateTicket(12345L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             def t = new Ticket().tap { it.id = id }
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+            return Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
         }
 
         when: "custom_status_id is a valid numeric string in CallToolRequest"
@@ -2353,8 +2392,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomStatuses and listCustomStatusesForForm overloads and CallToolRequest parameter handling"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
 
         when: "calling 4-arg listCustomStatuses overload"
         def res1 = tools.listCustomStatuses("open", false, false, (CallToolRequest) null)
@@ -2415,9 +2454,9 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "batchUpdateTickets parses string IDs and validates customStatus category and form in bulk and concurrent modes"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
-        customStatusClient.listTicketFormStatuses(null) >> reactor.core.publisher.Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
-        ticketFormsClient.listTicketForms() >> reactor.core.publisher.Mono.just(new TicketFormsResponse(createSampleTicketForms()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listTicketFormStatuses(null) >> Mono.just(new TicketFormStatusesResponse(createSampleTicketFormStatuses()))
+        ticketFormsClient.listTicketForms() >> Mono.just(new TicketFormsResponse(createSampleTicketForms()))
 
         ticketClient.showTicket(_ as Long) >> { Long id ->
             def t = new Ticket().tap {
@@ -2425,14 +2464,14 @@ class ZendeskToolsValidationSpec extends Specification {
                 it.status = TicketStatus.OPEN
                 it.ticketFormId = 1001L
             }
-            return reactor.core.publisher.Mono.just(new TicketResponse().tap { it.ticket = t })
+            return Mono.just(new TicketResponse().tap { it.ticket = t })
         }
         ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
             def t = new Ticket().tap { it.id = id }
-            return reactor.core.publisher.Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
+            return Mono.just(new TicketUpdateResponse().tap { it.ticket = t })
         }
         ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
-            return reactor.core.publisher.Mono.just(new JobStatusResponse(new JobStatus().tap { it.id = "job-batch-1" }))
+            return Mono.just(new JobStatusResponse(new JobStatus().tap { it.id = "job-batch-1" }))
         }
 
         when: "passing ticketIds as string representations in concurrent mode with customStatusId"
@@ -2506,11 +2545,11 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "createTicket sets customStatusId on TicketCreateInput when status is omitted"() {
         given:
-        customStatusClient.listCustomStatuses(null, null) >> reactor.core.publisher.Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
+        customStatusClient.listCustomStatuses(null, null) >> Mono.just(new CustomStatusesResponse(createSampleCustomStatuses()))
         TicketCreateRequest capturedReq = null
         ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new TicketResponse())
+            return Mono.just(new TicketResponse())
         }
 
         when: "customStatusId 101 has category 'open' and status is omitted"
@@ -2527,7 +2566,7 @@ class ZendeskToolsValidationSpec extends Specification {
         CustomObjectsCreateRequest capturedReq = null
         customObjectsClient.createCustomObject(_ as CustomObjectsCreateRequest) >> { CustomObjectsCreateRequest req ->
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new CustomObjectResponse().tap {
+            return Mono.just(new CustomObjectResponse().tap {
                 customObject = req.customObject
             })
         }
@@ -2581,7 +2620,7 @@ class ZendeskToolsValidationSpec extends Specification {
         customObjectsClient.updateCustomObject(_ as String, _ as CustomObjectsCreateRequest) >> { String key, CustomObjectsCreateRequest req ->
             capturedKey = key
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new CustomObjectResponse().tap {
+            return Mono.just(new CustomObjectResponse().tap {
                 customObject = req.customObject
             })
         }
@@ -2610,7 +2649,7 @@ class ZendeskToolsValidationSpec extends Specification {
         String capturedKey = null
         customObjectsClient.deleteCustomObject(_ as String) >> { String key ->
             capturedKey = key
-            return reactor.core.publisher.Mono.empty()
+            return Mono.empty()
         }
 
         when: "missing key"
@@ -2631,13 +2670,15 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "getCustomObjectLimits returns limits from client"() {
         given:
-        customObjectsClient.customObjectsLimit() >> reactor.core.publisher.Mono.just(new CustomObjectLimitsResponse())
+        customObjectsClient.customObjectsLimit() >> Mono.just(new CustomObjectLimitsResponse(15L, 1000L))
 
         when:
         def limits = tools.getCustomObjectLimits()
 
         then:
         limits != null
+        limits.count == 15L
+        limits.limit == 1000L
     }
 
     def "createCustomObjectRecord creates record and validates required customObjectKey"() {
@@ -2647,7 +2688,7 @@ class ZendeskToolsValidationSpec extends Specification {
         customObjectRecordsClient.createCustomObjectRecord(_ as String, _ as CustomObjectRecordsCreateRequest) >> { String key, CustomObjectRecordsCreateRequest req ->
             capturedKey = key
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new CustomObjectRecordResponse().tap {
+            return Mono.just(new CustomObjectRecordResponse().tap {
                 customObjectRecord = req.customObjectRecord
             })
         }
@@ -2680,7 +2721,7 @@ class ZendeskToolsValidationSpec extends Specification {
             capturedKey = key
             capturedId = id
             capturedReq = req
-            return reactor.core.publisher.Mono.just(new CustomObjectRecordResponse().tap {
+            return Mono.just(new CustomObjectRecordResponse().tap {
                 customObjectRecord = req.customObjectRecord
             })
         }
@@ -2719,7 +2760,7 @@ class ZendeskToolsValidationSpec extends Specification {
         customObjectRecordsClient.deleteCustomObjectRecord(_ as String, _ as String) >> { String key, String id ->
             capturedKey = key
             capturedId = id
-            return reactor.core.publisher.Mono.empty()
+            return Mono.empty()
         }
 
         when: "missing recordId"
@@ -2760,13 +2801,25 @@ class ZendeskToolsValidationSpec extends Specification {
 
     def "listCustomObjects lists all custom objects"() {
         given:
-        customObjectsClient.listCustomObjects() >> Mono.just(new CustomObjectsResponse())
+        def expected = new CustomObjectsResponse().tap {
+            customObjects = [
+                new CustomObject().tap {
+                    key = "car"
+                    title = "Car"
+                    titlePluralized = "Cars"
+                }
+            ]
+        }
+        customObjectsClient.listCustomObjects() >> Mono.just(expected)
 
         when:
         def resp = tools.listCustomObjects()
 
         then:
         resp != null
+        resp.customObjects.size() == 1
+        resp.customObjects[0].key == "car"
+        resp.customObjects[0].title == "Car"
     }
 
     def "getCustomObject fetches custom object by key and validates required key"() {
@@ -3333,6 +3386,21 @@ class ZendeskToolsValidationSpec extends Specification {
         capturedReq.customObjectRecord.name == "Tesla #3"
         capturedReq.customObjectRecord.externalId == "ext_tesla_3"
         capturedReq.customObjectRecord.customObjectFields == [color: "silver"]
+
+        when: "customObjectFields and externalId (camelCase) at top level in request arguments"
+        def callReq4 = new CallToolRequest("createCustomObjectRecord", [
+            customObjectKey: "car",
+            name: "Tesla #4",
+            externalId: "ext_tesla_4",
+            customObjectFields: [wheels: "19inch"]
+        ])
+        tools.createCustomObjectRecord("car", "Tesla #4", null, null, null, callReq4)
+
+        then:
+        capturedReq != null
+        capturedReq.customObjectRecord.name == "Tesla #4"
+        capturedReq.customObjectRecord.externalId == "ext_tesla_4"
+        capturedReq.customObjectRecord.customObjectFields == [wheels: "19inch"]
     }
 
     def "ticket tools validate non-positive requesterId on update and build"() {

@@ -196,7 +196,8 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
                 return null;
             }
             if (rootNode.isArray()) {
-                return formatArrayErrors(rootNode);
+                String formatted = formatArrayErrors(rootNode);
+                return (formatted != null && !formatted.isBlank()) ? formatted : null;
             }
             StringBuilder sb = new StringBuilder();
 

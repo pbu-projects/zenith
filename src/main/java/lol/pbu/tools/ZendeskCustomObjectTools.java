@@ -389,9 +389,13 @@ public class ZendeskCustomObjectTools {
 
         if (record.getCustomObjectFields() == null && args.containsKey("custom_object_fields") && args.get("custom_object_fields") instanceof Map<?, ?> m) {
             record.setCustomObjectFields((Map<String, Object>) m);
+        } else if (record.getCustomObjectFields() == null && args.containsKey("customObjectFields") && args.get("customObjectFields") instanceof Map<?, ?> m) {
+            record.setCustomObjectFields((Map<String, Object>) m);
         }
         if (record.getExternalId() == null && args.containsKey("external_id") && args.get("external_id") != null) {
             record.setExternalId(String.valueOf(args.get("external_id")));
+        } else if (record.getExternalId() == null && args.containsKey("externalId") && args.get("externalId") != null) {
+            record.setExternalId(String.valueOf(args.get("externalId")));
         }
 
         return record;
