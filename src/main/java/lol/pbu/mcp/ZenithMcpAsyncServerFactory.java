@@ -103,19 +103,14 @@ public class ZenithMcpAsyncServerFactory {
             String name = rawSpec.tool().name();
             ToolMethodEntry entry = reactiveToolMethodRegistry.find(name);
             if (entry != null) {
-                reactiveTools.add(new AsyncToolSpecification(
-                        rawSpec.tool(),
-                        (exchange, request) -> invokeTool(
-                                entry.beanDefinition(),
-                                entry.method(),
-                                exchange,
-                                request,
-                                argumentBinderRegistry,
-                                jsonMapper,
-                                beanContext,
-                                exceptionMappers,
-                                jsonSchemaClassPathResourceLoader
-                        )
+                reactiveTools.add(createAsyncToolSpecification(
+                        rawSpec,
+                        entry,
+                        argumentBinderRegistry,
+                        jsonMapper,
+                        beanContext,
+                        exceptionMappers,
+                        jsonSchemaClassPathResourceLoader
                 ));
             } else {
                 reactiveTools.add(rawSpec);
@@ -159,6 +154,32 @@ public class ZenithMcpAsyncServerFactory {
 
         log.info("Initialized reactive McpAsyncServer with {} non-blocking tools", allTools.size());
         return spec.build();
+    }
+
+    @SuppressWarnings("java:S107")
+    static AsyncToolSpecification createAsyncToolSpecification(
+            AsyncToolSpecification rawSpec,
+            ToolMethodEntry entry,
+            ArgumentBinderRegistry<CallToolRequest> argumentBinderRegistry,
+            JsonMapper jsonMapper,
+            BeanContext beanContext,
+            List<McpErrorExceptionMapper<? extends Throwable>> exceptionMappers,
+            @Nullable JsonSchemaClassPathResourceLoader jsonSchemaClassPathResourceLoader
+    ) {
+        return new AsyncToolSpecification(
+                rawSpec.tool(),
+                (exchange, request) -> invokeTool(
+                        entry.beanDefinition(),
+                        entry.method(),
+                        exchange,
+                        request,
+                        argumentBinderRegistry,
+                        jsonMapper,
+                        beanContext,
+                        exceptionMappers,
+                        jsonSchemaClassPathResourceLoader
+                )
+        );
     }
 
     @SuppressWarnings({"java:S107", "unchecked"})

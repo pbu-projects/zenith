@@ -1,12 +1,19 @@
 package lol.pbu.mcp
 
 import io.micronaut.context.ApplicationContext
+import io.micronaut.core.bind.ArgumentBinderRegistry
+import io.micronaut.core.type.Argument
+import io.micronaut.json.JsonMapper
+import io.micronaut.jsonschema.utils.JsonSchemaClassPathResourceLoader
+import io.micronaut.mcp.server.exceptions.McpErrorExceptionMapper
+import io.micronaut.mcp.server.registry.ToolRegistry
 import io.modelcontextprotocol.server.McpAsyncServer
 import io.modelcontextprotocol.server.McpServerFeatures.AsyncToolSpecification
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult
 import io.modelcontextprotocol.spec.McpSchema.TextContent
+import io.modelcontextprotocol.spec.McpSchema.Tool
 import reactor.core.publisher.Mono
 import spock.lang.Specification
 
@@ -19,6 +26,11 @@ class ReactiveToolExecutionSpec extends Specification {
                 .start()
         ReactiveToolMethodRegistry registry = context.getBean(ReactiveToolMethodRegistry)
         McpAsyncServer server = context.getBean(McpAsyncServer)
+        ToolRegistry toolRegistry = context.getBean(ToolRegistry)
+        ArgumentBinderRegistry<CallToolRequest> binderRegistry = (ArgumentBinderRegistry<CallToolRequest>) context.getBean(Argument.of(ArgumentBinderRegistry, CallToolRequest))
+        JsonMapper jsonMapper = context.getBean(JsonMapper)
+        List<McpErrorExceptionMapper<? extends Throwable>> exceptionMappers = (List<McpErrorExceptionMapper<? extends Throwable>>) context.getBeansOfType(McpErrorExceptionMapper)
+        JsonSchemaClassPathResourceLoader schemaLoader = context.findBean(JsonSchemaClassPathResourceLoader).orElse(null)
 
         when: "discovering registered tool methods"
         def echoEntry = registry.find("test_echo")
@@ -32,22 +44,27 @@ class ReactiveToolExecutionSpec extends Specification {
         emptyEntry != null
         futureEntry != null
 
-        when: "inspecting McpAsyncServer tools"
-        def serverToolsField = McpAsyncServer.getDeclaredField("tools")
-        serverToolsField.setAccessible(true)
-        List<AsyncToolSpecification> specs = (List<AsyncToolSpecification>) serverToolsField.get(server)
-        def echoSpec = specs.find { it.tool().name() == "test_echo" }
-        def errorSpec = specs.find { it.tool().name() == "test_error" }
-        def emptySpec = specs.find { it.tool().name() == "test_empty" }
-        def futureSpec = specs.find { it.tool().name() == "test_future" }
+        when: "listing tools via McpAsyncServer public API"
+        List<Tool> serverTools = server.listTools().collectList().block()
+        def echoTool = serverTools.find { it.name() == "test_echo" }
+        def errorTool = serverTools.find { it.name() == "test_error" }
+        def emptyTool = serverTools.find { it.name() == "test_empty" }
+        def futureTool = serverTools.find { it.name() == "test_future" }
 
-        then: "tool specifications are present on server"
-        echoSpec != null
-        errorSpec != null
-        emptySpec != null
-        futureSpec != null
+        then: "tools are registered on McpAsyncServer"
+        echoTool != null
+        errorTool != null
+        emptyTool != null
+        futureTool != null
 
-        when: "invoking test_echo tool"
+        when: "building async tool specifications via factory without reflection"
+        List<AsyncToolSpecification> rawSpecs = toolRegistry.getAsyncSpecs()
+        def echoSpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_echo" }, echoEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
+        def errorSpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_error" }, errorEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
+        def emptySpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_empty" }, emptyEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
+        def futureSpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_future" }, futureEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
+
+        and: "invoking test_echo tool"
         CallToolRequest echoReq = new CallToolRequest("test_echo", Map.of("message", "reactive-world"))
         Mono<CallToolResult> echoMono = echoSpec.callHandler().apply(null, echoReq)
         CallToolResult echoResult = echoMono.block()
