@@ -101,45 +101,62 @@ public final class ToolValidationSupport {
         }
     }
 
+    @Nullable
+    @SuppressWarnings("java:S1168") // null return indicates parameter was omitted, whereas empty list indicates clearing tags
     public static List<String> resolveAndValidateTags(
             @Nullable List<String> explicitTags,
             String camelKey,
             @Nullable String snakeKey,
             @Nullable CallToolRequest request
     ) {
-        Object raw = explicitTags;
-        if (raw == null && request != null && request.arguments() != null) {
-            if (snakeKey != null && request.arguments().containsKey(snakeKey)) {
-                raw = request.arguments().get(snakeKey);
-            } else if (camelKey != null && request.arguments().containsKey(camelKey)) {
-                raw = request.arguments().get(camelKey);
-            }
-        }
+        Object raw = extractRawTags(explicitTags, camelKey, snakeKey, request);
         if (raw == null) {
             return null;
         }
-        Collection<?> items;
-        if (raw instanceof Collection<?> coll) {
-            items = coll;
-        } else if (raw instanceof Object[] arr) {
-            items = Arrays.asList(arr);
-        } else {
-            throw new IllegalArgumentException(camelKey + " must be a list of strings, got: " + raw.getClass().getSimpleName());
-        }
+        Collection<?> items = switch (raw) {
+            case Collection<?> coll -> coll;
+            case Object[] arr -> Arrays.asList(arr);
+            default -> throw new IllegalArgumentException(camelKey + " must be a list of strings, got: " + raw.getClass().getSimpleName());
+        };
         List<String> validated = new ArrayList<>(items.size());
         for (Object item : items) {
-            if (item == null) {
-                throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot be null");
-            }
-            String tag = item.toString();
-            if (tag.isEmpty() || tag.isBlank()) {
-                throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot be empty or whitespace");
-            }
-            if (tag.chars().anyMatch(Character::isWhitespace)) {
-                throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot contain whitespace: '" + tag + "'");
-            }
-            validated.add(tag);
+            validated.add(validateTagItem(item, camelKey));
         }
         return validated;
+    }
+
+    private static Object extractRawTags(
+            @Nullable List<String> explicitTags,
+            String camelKey,
+            @Nullable String snakeKey,
+            @Nullable CallToolRequest request
+    ) {
+        if (explicitTags != null) {
+            return explicitTags;
+        }
+        if (request == null || request.arguments() == null) {
+            return null;
+        }
+        if (snakeKey != null && request.arguments().containsKey(snakeKey)) {
+            return request.arguments().get(snakeKey);
+        }
+        if (camelKey != null && request.arguments().containsKey(camelKey)) {
+            return request.arguments().get(camelKey);
+        }
+        return null;
+    }
+
+    private static String validateTagItem(Object item, String camelKey) {
+        if (item == null) {
+            throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot be null");
+        }
+        String tag = item.toString();
+        if (tag.isBlank()) {
+            throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot be empty or whitespace");
+        }
+        if (tag.chars().anyMatch(Character::isWhitespace)) {
+            throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot contain whitespace: '" + tag + "'");
+        }
+        return tag;
     }
 }
