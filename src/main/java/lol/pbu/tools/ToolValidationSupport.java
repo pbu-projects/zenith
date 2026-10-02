@@ -2,8 +2,11 @@ package lol.pbu.tools;
 
 import io.micronaut.core.annotation.Nullable;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public final class ToolValidationSupport {
@@ -11,6 +14,11 @@ public final class ToolValidationSupport {
     public static final String PARAM_CUSTOM_STATUS_ID_SNAKE = "custom_status_id";
     public static final String PARAM_TICKET_FORM_ID_SNAKE = "ticket_form_id";
     public static final String PARAM_TICKET_FORM_ID_CAMEL = "ticketFormId";
+    public static final String PARAM_ADDITIONAL_TAGS_CAMEL = "additionalTags";
+    public static final String PARAM_ADDITIONAL_TAGS_SNAKE = "additional_tags";
+    public static final String PARAM_REMOVE_TAGS_CAMEL = "removeTags";
+    public static final String PARAM_REMOVE_TAGS_SNAKE = "remove_tags";
+    public static final String PARAM_TAGS = "tags";
 
     private ToolValidationSupport() {}
 
@@ -91,5 +99,47 @@ public final class ToolValidationSupport {
         if (ticketFormId <= 0) {
             throw new IllegalArgumentException("ticketFormId must be a positive integer, got: " + ticketFormId);
         }
+    }
+
+    public static List<String> resolveAndValidateTags(
+            @Nullable List<String> explicitTags,
+            String camelKey,
+            @Nullable String snakeKey,
+            @Nullable CallToolRequest request
+    ) {
+        Object raw = explicitTags;
+        if (raw == null && request != null && request.arguments() != null) {
+            if (snakeKey != null && request.arguments().containsKey(snakeKey)) {
+                raw = request.arguments().get(snakeKey);
+            } else if (camelKey != null && request.arguments().containsKey(camelKey)) {
+                raw = request.arguments().get(camelKey);
+            }
+        }
+        if (raw == null) {
+            return null;
+        }
+        Collection<?> items;
+        if (raw instanceof Collection<?> coll) {
+            items = coll;
+        } else if (raw instanceof Object[] arr) {
+            items = Arrays.asList(arr);
+        } else {
+            throw new IllegalArgumentException(camelKey + " must be a list of strings, got: " + raw.getClass().getSimpleName());
+        }
+        List<String> validated = new ArrayList<>(items.size());
+        for (Object item : items) {
+            if (item == null) {
+                throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot be null");
+            }
+            String tag = item.toString();
+            if (tag.isEmpty() || tag.isBlank()) {
+                throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot be empty or whitespace");
+            }
+            if (tag.chars().anyMatch(Character::isWhitespace)) {
+                throw new IllegalArgumentException("Tag in '" + camelKey + "' cannot contain whitespace: '" + tag + "'");
+            }
+            validated.add(tag);
+        }
+        return validated;
     }
 }

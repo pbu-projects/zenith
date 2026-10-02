@@ -47,10 +47,10 @@ Add to your MCP client config:
 * `getTickets`: Fetch multiple tickets by IDs.
 * `listTickets`: List recent tickets.
 * `getTicketCount`: Fetch ticket counts.
-* `createTicket`: Create ticket (supports subject, comment, status, priority, and attachments).
-* `updateTicket`: Update ticket comment, status, priority, or attachments.
+* `createTicket`: Create ticket (supports subject, comment, status, priority, attachments, custom fields, requester ID, custom status, ticket form, and tags via `additionalTags`, `removeTags`, or destructive `tags`).
+* `updateTicket`: Update ticket comment, status, priority, attachments, custom fields, custom status, ticket form, link to problem tickets, or tags (`additionalTags` to add without removing existing ones, `removeTags` to remove specific tags; prefer these over destructive `tags` which replaces the entire tag set).
 * `uploadAttachment`: Upload local file or image and receive an upload token to attach to tickets.
-* `batchUpdateTickets`: Batch update multiple tickets concurrently or asynchronously via Zendesk bulk job.
+* `batchUpdateTickets`: Batch update multiple tickets concurrently or asynchronously via Zendesk bulk job (supports tags via `additionalTags`, `removeTags`, or destructive `tags`).
 * `getJobStatus`: Fetch status and progress of an asynchronous Zendesk background job by ID.
 * `getTicketAudits`: Fetch full audit event history for a ticket (field changes, comments, notifications, and trigger/business rule executions).
 

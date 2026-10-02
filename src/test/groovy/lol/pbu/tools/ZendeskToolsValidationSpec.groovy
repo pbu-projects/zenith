@@ -33,6 +33,7 @@ import lol.pbu.client.CustomStatusClient
 import lol.pbu.model.CustomStatusesResponse
 import lol.pbu.model.TicketFormStatus
 import lol.pbu.model.TicketFormStatusesResponse
+import lol.pbu.model.TicketCreateInputWithTags
 import lol.pbu.model.TicketMutationOptions
 import lol.pbu.model.TicketUpdateInputWithForm
 import lol.pbu.service.ZendeskMetadataService
@@ -3437,6 +3438,207 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         def e = thrown(IllegalArgumentException)
         e.message.contains("requesterId must be a positive integer, got: -10")
+    }
+
+    def "createTicket applies additionalTags, removeTags, and tags"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketResponse())
+        }
+
+        when: "calling createTicket with explicit additionalTags, removeTags, and tags"
+        tools.createTicket(
+                "Tag Subject", "Tag Comment", true, null, null, null, null,
+                null, null, null, null, null,
+                ["add1", "add2"], ["rem1"], ["base1", "base2"], null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket instanceof TicketCreateInputWithTags
+        def tagInput = (TicketCreateInputWithTags) capturedReq.ticket
+        tagInput.additionalTags == ["add1", "add2"]
+        tagInput.removeTags == ["rem1"]
+        tagInput.tags == ["base1", "base2"]
+
+        when: "calling createTicket with snake_case additional_tags and remove_tags in CallToolRequest"
+        capturedReq = null
+        def req = new CallToolRequest("createTicket", [
+                subject: "Snake Subject",
+                comment: "Snake Comment",
+                additional_tags: ["snake_add"],
+                remove_tags: ["snake_rem"],
+                tags: ["snake_tags"]
+        ])
+        tools.createTicket("Snake Subject", "Snake Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, req)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket instanceof TicketCreateInputWithTags
+        def snakeTagInput = (TicketCreateInputWithTags) capturedReq.ticket
+        snakeTagInput.additionalTags == ["snake_add"]
+        snakeTagInput.removeTags == ["snake_rem"]
+        snakeTagInput.tags == ["snake_tags"]
+    }
+
+    def "updateTicket applies additionalTags, removeTags, and tags"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(200L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketUpdateResponse())
+        }
+
+        when: "calling updateTicket with explicit additionalTags, removeTags, and tags"
+        tools.updateTicket(
+                200L, "Update Comment", null, null, true, null, null,
+                null, null, null, null, null, null, null,
+                ["add_tag"], ["rem_tag"], ["fixed_tag"], null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        def tagInput = (TicketUpdateInputWithForm) capturedReq.ticket
+        tagInput.additionalTags == ["add_tag"]
+        tagInput.removeTags == ["rem_tag"]
+        tagInput.tags == ["fixed_tag"]
+
+        when: "calling updateTicket with snake_case additional_tags and remove_tags in CallToolRequest"
+        capturedReq = null
+        def req = new CallToolRequest("updateTicket", [
+                additional_tags: ["snake_add_2"],
+                remove_tags: ["snake_rem_2"],
+                tags: ["snake_tags_2"]
+        ])
+        tools.updateTicket(200L, null, null, null, null, null, null, null, null, null, null, null, null, null, req)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        def snakeTagInput = (TicketUpdateInputWithForm) capturedReq.ticket
+        snakeTagInput.additionalTags == ["snake_add_2"]
+        snakeTagInput.removeTags == ["snake_rem_2"]
+        snakeTagInput.tags == ["snake_tags_2"]
+    }
+
+    def "batchUpdateTickets applies additionalTags, removeTags, and tags in concurrent and bulk modes"() {
+        given:
+        TicketUpdateRequest capturedConcurrentReq = null
+        ticketClient.updateTicket(300L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedConcurrentReq = req
+            def t = new Ticket().tap { setId(300L); setStatus(TicketStatus.OPEN) }
+            Mono.just(new TicketUpdateResponse().tap { setTicket(t) })
+        }
+        TicketUpdateRequest capturedBulkReq = null
+        ticketClient.updateManyTickets("300", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            capturedBulkReq = req
+            Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-tags-1" }))
+        }
+
+        when: "running concurrent batch update with tags"
+        def concurrentResp = tools.batchUpdateTickets(
+                [300L], "Concurrent tag update", null, null, true, null, null, false,
+                null, null, null, null, null, null, null,
+                ["bulk_add"], ["bulk_rem"], ["bulk_tag"], null
+        )
+
+        then:
+        concurrentResp != null
+        concurrentResp.results.size() == 1
+        concurrentResp.results[0].success
+        capturedConcurrentReq != null
+        capturedConcurrentReq.ticket instanceof TicketUpdateInputWithForm
+        def concurrentInput = (TicketUpdateInputWithForm) capturedConcurrentReq.ticket
+        concurrentInput.additionalTags == ["bulk_add"]
+        concurrentInput.removeTags == ["bulk_rem"]
+        concurrentInput.tags == ["bulk_tag"]
+
+        when: "running async bulk batch update with tags"
+        def bulkResp = tools.batchUpdateTickets(
+                [300L], null, null, null, null, null, null, true,
+                null, null, null, null, null, null, null,
+                ["async_add"], ["async_rem"], ["async_tag"], null
+        )
+
+        then:
+        bulkResp != null
+        bulkResp.jobStatus != null
+        bulkResp.jobStatus.id == "job-tags-1"
+        capturedBulkReq != null
+        capturedBulkReq.ticket instanceof TicketUpdateInputWithForm
+        def bulkInput = (TicketUpdateInputWithForm) capturedBulkReq.ticket
+        bulkInput.additionalTags == ["async_add"]
+        bulkInput.removeTags == ["async_rem"]
+        bulkInput.tags == ["async_tag"]
+    }
+
+    def "ticket tools validate tag inputs rejects invalid values"() {
+        when: "additionalTags contains null"
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, ["valid", null], null, null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Tag in 'additionalTags' cannot be null")
+
+        when: "removeTags contains empty string"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, null, null, null, ["valid", ""], null, null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Tag in 'removeTags' cannot be empty or whitespace")
+
+        when: "tags contains whitespace-only string"
+        tools.updateTicket(100L, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, ["   "], null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("Tag in 'tags' cannot be empty or whitespace")
+
+        when: "additionalTags contains embedded whitespace"
+        tools.batchUpdateTickets([100L], null, null, null, null, null, null, false, null, null, null, null, null, null, null, ["tag with space"], null, null, null)
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("Tag in 'additionalTags' cannot contain whitespace: 'tag with space'")
+
+        when: "tags is passed as non-collection in CallToolRequest"
+        def badReq = new CallToolRequest("createTicket", [
+                subject: "Subj",
+                comment: "Comm",
+                tags: "not-a-list"
+        ])
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, badReq)
+
+        then:
+        def e5 = thrown(IllegalArgumentException)
+        e5.message.contains("tags must be a list of strings, got: String")
+    }
+
+    def "TicketMutationOptions toBuilder and builders preserve tag fields"() {
+        given:
+        def initial = TicketMutationOptions.builder()
+                .comment("Original")
+                .additionalTags(["orig_add"])
+                .removeTags(["orig_rem"])
+                .tags(["orig_tag"])
+                .build()
+
+        when:
+        def modified = initial.toBuilder()
+                .additionalTags(["new_add"])
+                .build()
+
+        then:
+        initial.additionalTags() == ["orig_add"]
+        initial.removeTags() == ["orig_rem"]
+        initial.tags() == ["orig_tag"]
+        modified.additionalTags() == ["new_add"]
+        modified.removeTags() == ["orig_rem"]
+        modified.tags() == ["orig_tag"]
+        modified.comment() == "Original"
     }
 }
 
