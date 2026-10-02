@@ -61,7 +61,7 @@ import java.util.concurrent.CompletableFuture;
  * reactive tool dispatching for tools returning {@link Publisher}, {@link Mono}, or {@link CompletableFuture}.
  */
 @Factory
-@Requires(property = "micronaut.mcp.server.reactive", value = "true")
+@Requires(property = "micronaut.mcp.server.reactive", value = "true", defaultValue = "true")
 public class ZenithMcpAsyncServerFactory {
 
     private static final Logger log = LoggerFactory.getLogger(ZenithMcpAsyncServerFactory.class);
@@ -104,7 +104,7 @@ public class ZenithMcpAsyncServerFactory {
             if (entry != null) {
                 reactiveTools.add(new AsyncToolSpecification(
                         rawSpec.tool(),
-                        (exchange, request) -> invokeToolReactively(
+                        (exchange, request) -> invokeTool(
                                 entry.beanDefinition(),
                                 entry.method(),
                                 exchange,
@@ -161,7 +161,7 @@ public class ZenithMcpAsyncServerFactory {
     }
 
     @SuppressWarnings("unchecked")
-    private static <B> Mono<CallToolResult> invokeToolReactively(
+    private static <B> Mono<CallToolResult> invokeTool(
             BeanDefinition<?> rawBeanDefinition,
             ExecutableMethod<?, ?> rawMethod,
             McpAsyncServerExchange exchange,
@@ -242,14 +242,23 @@ public class ZenithMcpAsyncServerFactory {
         if (payload.getClass().isEnum()) {
             return CallToolResult.builder().addTextContent(payload.toString()).isError(false).build();
         }
-        try {
-            String json = jsonMapper.writeValueAsString(payload);
-            if (hasOutputSchema(returnTypeArg, jsonSchemaClassPathResourceLoader)) {
+        if (hasOutputSchema(returnTypeArg, jsonSchemaClassPathResourceLoader)) {
+            if (payload instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> stringMap = (Map<String, Object>) map;
+                return CallToolResult.builder().structuredContent(stringMap).isError(false).build();
+            }
+            try {
+                String json = jsonMapper.writeValueAsString(payload);
                 Map<String, Object> map = jsonMapper.readValue(json, Argument.mapOf(String.class, Object.class));
                 return CallToolResult.builder().structuredContent(map).isError(false).build();
-            } else {
-                return CallToolResult.builder().addTextContent(json).isError(false).build();
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to serialize tool execution result", e);
             }
+        }
+        try {
+            String json = jsonMapper.writeValueAsString(payload);
+            return CallToolResult.builder().addTextContent(json).isError(false).build();
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize tool execution result", e);
         }

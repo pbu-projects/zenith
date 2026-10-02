@@ -21,18 +21,17 @@ class ReactiveToolExecutionSpec extends Specification {
         given:
         ApplicationContext context = ApplicationContext.builder()
                 .packages("lol.pbu.mcp")
-                .properties(["micronaut.mcp.server.reactive": "true"])
                 .start()
         ReactiveToolMethodRegistry registry = context.getBean(ReactiveToolMethodRegistry)
         McpAsyncServer server = context.getBean(McpAsyncServer)
 
-        when: "discovering registered reactive tools"
+        when: "discovering registered tool methods"
         def echoEntry = registry.find("test_echo")
         def errorEntry = registry.find("test_error")
         def emptyEntry = registry.find("test_empty")
         def futureEntry = registry.find("test_future")
 
-        then: "all reactive methods are indexed"
+        then: "all tool methods are indexed"
         echoEntry != null
         errorEntry != null
         emptyEntry != null
@@ -53,12 +52,12 @@ class ReactiveToolExecutionSpec extends Specification {
         emptySpec != null
         futureSpec != null
 
-        when: "invoking test_echo reactively"
+        when: "invoking test_echo tool"
         CallToolRequest echoReq = new CallToolRequest("test_echo", Map.of("message", "reactive-world"))
         Mono<CallToolResult> echoMono = echoSpec.callHandler().apply(null, echoReq)
         CallToolResult echoResult = echoMono.block()
 
-        then: "echo returns structured or text content matching the Mono payload"
+        then: "echo returns structured or text content matching the payload"
         echoResult != null
         !echoResult.isError()
         echoResult.content() != null
@@ -67,7 +66,7 @@ class ReactiveToolExecutionSpec extends Specification {
         content.text().contains("reactive-world")
         content.text().contains("ok")
 
-        when: "invoking test_future reactively"
+        when: "invoking test_future tool"
         CallToolRequest futureReq = new CallToolRequest("test_future", Map.of("name", "Graeme"))
         Mono<CallToolResult> futureMono = futureSpec.callHandler().apply(null, futureReq)
         CallToolResult futureResult = futureMono.block()
@@ -78,7 +77,7 @@ class ReactiveToolExecutionSpec extends Specification {
         TextContent futureContent = (TextContent) futureResult.content().get(0)
         futureContent.text().contains("Hello Graeme")
 
-        when: "invoking test_empty reactively"
+        when: "invoking test_empty tool"
         CallToolRequest emptyReq = new CallToolRequest("test_empty", Collections.emptyMap())
         Mono<CallToolResult> emptyMono = emptySpec.callHandler().apply(null, emptyReq)
         CallToolResult emptyResult = emptyMono.block()
@@ -87,7 +86,7 @@ class ReactiveToolExecutionSpec extends Specification {
         emptyResult != null
         !emptyResult.isError()
 
-        when: "invoking test_error reactively"
+        when: "invoking test_error tool"
         CallToolRequest errorReq = new CallToolRequest("test_error", Collections.emptyMap())
         Mono<CallToolResult> errorMono = errorSpec.callHandler().apply(null, errorReq)
         errorMono.block()

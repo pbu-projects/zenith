@@ -17,8 +17,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sonar:
+    uses: ./.github/workflows/sonar.yml
+    secrets: inherit
+
   build:
     name: Build (${{ matrix.os }})
+    needs: sonar
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
