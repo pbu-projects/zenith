@@ -26,9 +26,47 @@ import java.util.Map;
 import static lol.pbu.tools.ToolValidationSupport.validateKnownParameters;
 
 @Singleton
+@SuppressWarnings("java:S107")
 public class ZendeskCustomObjectTools {
 
     private static final Logger log = LoggerFactory.getLogger(ZendeskCustomObjectTools.class);
+
+    private static final String PARAM_CUSTOM_OBJECT_KEY = "customObjectKey";
+    private static final String PARAM_CUSTOM_OBJECT_KEY_SNAKE = "custom_object_key";
+    private static final String PARAM_KEY = "key";
+    private static final String PARAM_TITLE = "title";
+    private static final String PARAM_TITLE_PLURALIZED = "titlePluralized";
+    private static final String PARAM_TITLE_PLURALIZED_SNAKE = "title_pluralized";
+    private static final String PARAM_DESCRIPTION = "description";
+    private static final String PARAM_CUSTOM_OBJECT = "customObject";
+    private static final String PARAM_CUSTOM_OBJECT_SNAKE = "custom_object";
+    private static final String PARAM_NAME = "name";
+    private static final String PARAM_CUSTOM_OBJECT_FIELDS = "customObjectFields";
+    private static final String PARAM_CUSTOM_OBJECT_FIELDS_SNAKE = "custom_object_fields";
+    private static final String PARAM_EXTERNAL_ID = "externalId";
+    private static final String PARAM_EXTERNAL_ID_SNAKE = "external_id";
+    private static final String PARAM_CUSTOM_OBJECT_RECORD = "customObjectRecord";
+    private static final String PARAM_CUSTOM_OBJECT_RECORD_SNAKE = "custom_object_record";
+    private static final String PARAM_RECORD_ID = "recordId";
+    private static final String PARAM_RECORD_ID_SNAKE = "record_id";
+    private static final String PARAM_CUSTOM_OBJECT_RECORD_ID = "custom_object_record_id";
+    private static final String PARAM_QUERY = "query";
+    private static final String PARAM_SORT = "sort";
+    private static final String PARAM_FILTER_IDS = "filterIds";
+    private static final String PARAM_FILTER_IDS_SNAKE = "filter_ids";
+    private static final String PARAM_FILTER_EXTERNAL_IDS = "filterExternalIds";
+    private static final String PARAM_FILTER_EXTERNAL_IDS_SNAKE = "filter_external_ids";
+    private static final String PARAM_PAGE_BEFORE = "pageBefore";
+    private static final String PARAM_PAGE_BEFORE_SNAKE = "page_before";
+    private static final String PARAM_PAGE_AFTER = "pageAfter";
+    private static final String PARAM_PAGE_AFTER_SNAKE = "page_after";
+    private static final String PARAM_PAGE_SIZE = "pageSize";
+    private static final String PARAM_PAGE_SIZE_SNAKE = "page_size";
+
+    private static final String MSG_CUSTOM_OBJECT_KEY_REQUIRED = "customObjectKey is required";
+    private static final String MSG_CUSTOM_OBJECT_REQUIRED = "customObject is required";
+    private static final String MSG_RECORD_ID_REQUIRED = "recordId is required";
+    private static final String MSG_CUSTOM_OBJECT_RECORD_REQUIRED = "customObjectRecord is required";
     private final CustomObjectsClient customObjectsClient;
     private final CustomObjectRecordsClient customObjectRecordsClient;
 
@@ -50,7 +88,7 @@ public class ZendeskCustomObjectTools {
     ) {
         log.info("MCP Tool called: getCustomObject(key='{}')", customObjectKey);
         if (customObjectKey == null || customObjectKey.isBlank()) {
-            throw new IllegalArgumentException("customObjectKey is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         return customObjectsClient.showCustomObject(customObjectKey).block();
     }
@@ -65,7 +103,7 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: createCustomObject(key='{}', title='{}')", key, title);
-        validateKnownParameters(request, "createCustomObject", "key", "title", "titlePluralized", "title_pluralized", "description", "customObject", "custom_object");
+        validateKnownParameters(request, "createCustomObject", PARAM_KEY, PARAM_TITLE, PARAM_TITLE_PLURALIZED, PARAM_TITLE_PLURALIZED_SNAKE, PARAM_DESCRIPTION, PARAM_CUSTOM_OBJECT, PARAM_CUSTOM_OBJECT_SNAKE);
         CustomObject obj = resolveCustomObject(key, title, titlePluralized, description, customObject, request);
         if (obj.getKey() == null || obj.getKey().isBlank()) {
             throw new IllegalArgumentException("key is required when creating a custom object.");
@@ -82,7 +120,7 @@ public class ZendeskCustomObjectTools {
 
     public CustomObjectResponse createCustomObject(CustomObjectsCreateRequest customObjectRequest) {
         if (customObjectRequest == null || customObjectRequest.getCustomObject() == null) {
-            throw new IllegalArgumentException("customObject is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_REQUIRED);
         }
         return customObjectsClient.createCustomObject(customObjectRequest).block();
     }
@@ -97,7 +135,7 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: updateCustomObject(key='{}')", customObjectKey);
-        validateKnownParameters(request, "updateCustomObject", "customObjectKey", "custom_object_key", "title", "titlePluralized", "title_pluralized", "description", "customObject", "custom_object");
+        validateKnownParameters(request, "updateCustomObject", PARAM_CUSTOM_OBJECT_KEY, PARAM_CUSTOM_OBJECT_KEY_SNAKE, PARAM_TITLE, PARAM_TITLE_PLURALIZED, PARAM_TITLE_PLURALIZED_SNAKE, PARAM_DESCRIPTION, PARAM_CUSTOM_OBJECT, PARAM_CUSTOM_OBJECT_SNAKE);
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException("customObjectKey is required when updating a custom object.");
         }
@@ -108,10 +146,10 @@ public class ZendeskCustomObjectTools {
 
     public CustomObjectResponse updateCustomObject(String customObjectKey, CustomObjectsCreateRequest customObjectRequest) {
         if (customObjectKey == null || customObjectKey.isBlank()) {
-            throw new IllegalArgumentException("customObjectKey is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         if (customObjectRequest == null) {
-            throw new IllegalArgumentException("customObject is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_REQUIRED);
         }
         return customObjectsClient.updateCustomObject(customObjectKey, customObjectRequest).block();
     }
@@ -122,7 +160,7 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: deleteCustomObject(key='{}')", customObjectKey);
-        validateKnownParameters(request, "deleteCustomObject", "customObjectKey", "custom_object_key");
+        validateKnownParameters(request, "deleteCustomObject", PARAM_CUSTOM_OBJECT_KEY, PARAM_CUSTOM_OBJECT_KEY_SNAKE);
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException("customObjectKey is required when deleting a custom object.");
         }
@@ -152,9 +190,9 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: listCustomObjectRecords(key='{}')", customObjectKey);
-        validateKnownParameters(request, "listCustomObjectRecords", "customObjectKey", "custom_object_key", "filterIds", "filter_ids", "filterExternalIds", "filter_external_ids", "sort", "pageBefore", "page_before", "pageAfter", "page_after", "pageSize", "page_size");
+        validateKnownParameters(request, "listCustomObjectRecords", PARAM_CUSTOM_OBJECT_KEY, PARAM_CUSTOM_OBJECT_KEY_SNAKE, PARAM_FILTER_IDS, PARAM_FILTER_IDS_SNAKE, PARAM_FILTER_EXTERNAL_IDS, PARAM_FILTER_EXTERNAL_IDS_SNAKE, PARAM_SORT, PARAM_PAGE_BEFORE, PARAM_PAGE_BEFORE_SNAKE, PARAM_PAGE_AFTER, PARAM_PAGE_AFTER_SNAKE, PARAM_PAGE_SIZE, PARAM_PAGE_SIZE_SNAKE);
         if (customObjectKey == null || customObjectKey.isBlank()) {
-            throw new IllegalArgumentException("customObjectKey is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         return customObjectRecordsClient.listCustomObjectRecords(customObjectKey, filterIds, filterExternalIds, sort, pageBefore, pageAfter, pageSize).block();
     }
@@ -170,10 +208,10 @@ public class ZendeskCustomObjectTools {
     ) {
         log.info("MCP Tool called: getCustomObjectRecord(key='{}', recordId='{}')", customObjectKey, recordId);
         if (customObjectKey == null || customObjectKey.isBlank()) {
-            throw new IllegalArgumentException("customObjectKey is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         if (recordId == null || recordId.isBlank()) {
-            throw new IllegalArgumentException("recordId is required");
+            throw new IllegalArgumentException(MSG_RECORD_ID_REQUIRED);
         }
         return customObjectRecordsClient.showCustomObjectRecord(customObjectKey, recordId).block();
     }
@@ -188,21 +226,21 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: createCustomObjectRecord(key='{}', name='{}')", customObjectKey, name);
-        validateKnownParameters(request, "createCustomObjectRecord", "customObjectKey", "custom_object_key", "name", "customObjectFields", "custom_object_fields", "externalId", "external_id", "customObjectRecord", "custom_object_record");
+        validateKnownParameters(request, "createCustomObjectRecord", PARAM_CUSTOM_OBJECT_KEY, PARAM_CUSTOM_OBJECT_KEY_SNAKE, PARAM_NAME, PARAM_CUSTOM_OBJECT_FIELDS, PARAM_CUSTOM_OBJECT_FIELDS_SNAKE, PARAM_EXTERNAL_ID, PARAM_EXTERNAL_ID_SNAKE, PARAM_CUSTOM_OBJECT_RECORD, PARAM_CUSTOM_OBJECT_RECORD_SNAKE);
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException("customObjectKey is required when creating a custom object record.");
         }
-        CustomObjectRecord record = resolveCustomObjectRecord(name, customObjectFields, externalId, customObjectRecord, request);
-        CustomObjectRecordsCreateRequest req = new CustomObjectRecordsCreateRequest(record);
+        CustomObjectRecord recordObj = resolveCustomObjectRecord(name, customObjectFields, externalId, customObjectRecord, request);
+        CustomObjectRecordsCreateRequest req = new CustomObjectRecordsCreateRequest(recordObj);
         return customObjectRecordsClient.createCustomObjectRecord(customObjectKey, req).block();
     }
 
     public CustomObjectRecordResponse createCustomObjectRecord(String customObjectKey, CustomObjectRecordsCreateRequest createRequest) {
         if (customObjectKey == null || customObjectKey.isBlank()) {
-            throw new IllegalArgumentException("customObjectKey is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         if (createRequest == null || createRequest.getCustomObjectRecord() == null) {
-            throw new IllegalArgumentException("customObjectRecord is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_RECORD_REQUIRED);
         }
         return customObjectRecordsClient.createCustomObjectRecord(customObjectKey, createRequest).block();
     }
@@ -218,27 +256,27 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: updateCustomObjectRecord(key='{}', recordId='{}')", customObjectKey, recordId);
-        validateKnownParameters(request, "updateCustomObjectRecord", "customObjectKey", "custom_object_key", "recordId", "record_id", "custom_object_record_id", "name", "customObjectFields", "custom_object_fields", "externalId", "external_id", "customObjectRecord", "custom_object_record");
+        validateKnownParameters(request, "updateCustomObjectRecord", PARAM_CUSTOM_OBJECT_KEY, PARAM_CUSTOM_OBJECT_KEY_SNAKE, PARAM_RECORD_ID, PARAM_RECORD_ID_SNAKE, PARAM_CUSTOM_OBJECT_RECORD_ID, PARAM_NAME, PARAM_CUSTOM_OBJECT_FIELDS, PARAM_CUSTOM_OBJECT_FIELDS_SNAKE, PARAM_EXTERNAL_ID, PARAM_EXTERNAL_ID_SNAKE, PARAM_CUSTOM_OBJECT_RECORD, PARAM_CUSTOM_OBJECT_RECORD_SNAKE);
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException("customObjectKey is required when updating a custom object record.");
         }
         if (recordId == null || recordId.isBlank()) {
             throw new IllegalArgumentException("recordId is required when updating a custom object record.");
         }
-        CustomObjectRecord record = resolveCustomObjectRecord(name, customObjectFields, externalId, customObjectRecord, request);
-        CustomObjectRecordsCreateRequest req = new CustomObjectRecordsCreateRequest(record);
+        CustomObjectRecord recordObj = resolveCustomObjectRecord(name, customObjectFields, externalId, customObjectRecord, request);
+        CustomObjectRecordsCreateRequest req = new CustomObjectRecordsCreateRequest(recordObj);
         return customObjectRecordsClient.updateCustomObjectRecord(customObjectKey, recordId, req).block();
     }
 
     public CustomObjectRecordResponse updateCustomObjectRecord(String customObjectKey, String recordId, CustomObjectRecordsCreateRequest updateRequest) {
         if (customObjectKey == null || customObjectKey.isBlank()) {
-            throw new IllegalArgumentException("customObjectKey is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         if (recordId == null || recordId.isBlank()) {
-            throw new IllegalArgumentException("recordId is required");
+            throw new IllegalArgumentException(MSG_RECORD_ID_REQUIRED);
         }
         if (updateRequest == null) {
-            throw new IllegalArgumentException("customObjectRecord is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_RECORD_REQUIRED);
         }
         return customObjectRecordsClient.updateCustomObjectRecord(customObjectKey, recordId, updateRequest).block();
     }
@@ -250,7 +288,7 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: deleteCustomObjectRecord(key='{}', recordId='{}')", customObjectKey, recordId);
-        validateKnownParameters(request, "deleteCustomObjectRecord", "customObjectKey", "custom_object_key", "recordId", "record_id", "custom_object_record_id");
+        validateKnownParameters(request, "deleteCustomObjectRecord", PARAM_CUSTOM_OBJECT_KEY, PARAM_CUSTOM_OBJECT_KEY_SNAKE, PARAM_RECORD_ID, PARAM_RECORD_ID_SNAKE, PARAM_CUSTOM_OBJECT_RECORD_ID);
         if (customObjectKey == null || customObjectKey.isBlank()) {
             throw new IllegalArgumentException("customObjectKey is required when deleting a custom object record.");
         }
@@ -276,9 +314,9 @@ public class ZendeskCustomObjectTools {
             @Nullable CallToolRequest request
     ) {
         log.info("MCP Tool called: searchCustomObjectRecords(key='{}', query='{}')", customObjectKey, query);
-        validateKnownParameters(request, "searchCustomObjectRecords", "customObjectKey", "custom_object_key", "query", "sort", "pageBefore", "page_before", "pageAfter", "page_after", "pageSize", "page_size");
+        validateKnownParameters(request, "searchCustomObjectRecords", PARAM_CUSTOM_OBJECT_KEY, PARAM_CUSTOM_OBJECT_KEY_SNAKE, PARAM_QUERY, PARAM_SORT, PARAM_PAGE_BEFORE, PARAM_PAGE_BEFORE_SNAKE, PARAM_PAGE_AFTER, PARAM_PAGE_AFTER_SNAKE, PARAM_PAGE_SIZE, PARAM_PAGE_SIZE_SNAKE);
         if (customObjectKey == null || customObjectKey.isBlank()) {
-            throw new IllegalArgumentException("customObjectKey is required");
+            throw new IllegalArgumentException(MSG_CUSTOM_OBJECT_KEY_REQUIRED);
         }
         if (query == null || query.isBlank()) {
             throw new IllegalArgumentException("query is required");
@@ -290,7 +328,6 @@ public class ZendeskCustomObjectTools {
         return searchCustomObjectRecords(customObjectKey, query, null, null, null, null, null);
     }
 
-    @SuppressWarnings("unchecked")
     private CustomObject resolveCustomObject(
             @Nullable String key,
             @Nullable String title,
@@ -306,43 +343,58 @@ public class ZendeskCustomObjectTools {
         obj.setDescription(description);
 
         Map<String, Object> args = request != null && request.arguments() != null ? request.arguments() : Collections.emptyMap();
-
-        if (customObjectMap == null) {
-            Object nested = args.get("custom_object");
-            if (nested instanceof Map<?, ?> m) {
-                customObjectMap = (Map<String, Object>) m;
-            } else {
-                nested = args.get("customObject");
-                if (nested instanceof Map<?, ?> m) {
-                    customObjectMap = (Map<String, Object>) m;
-                }
-            }
-        }
-
-        if (customObjectMap != null) {
-            if (obj.getKey() == null && customObjectMap.get("key") != null) {
-                obj.setKey(String.valueOf(customObjectMap.get("key")));
-            }
-            if (obj.getTitle() == null && customObjectMap.get("title") != null) {
-                obj.setTitle(String.valueOf(customObjectMap.get("title")));
-            }
-            if (obj.getTitlePluralized() == null) {
-                Object tp = customObjectMap.get("title_pluralized");
-                if (tp == null) tp = customObjectMap.get("titlePluralized");
-                if (tp != null) obj.setTitlePluralized(String.valueOf(tp));
-            }
-            if (obj.getDescription() == null && customObjectMap.get("description") != null) {
-                obj.setDescription(String.valueOf(customObjectMap.get("description")));
-            }
-        }
-
-        if (obj.getTitlePluralized() == null && args.containsKey("title_pluralized") && args.get("title_pluralized") != null) {
-            obj.setTitlePluralized(String.valueOf(args.get("title_pluralized")));
-        }
+        Map<String, Object> resolvedMap = resolveNestedCustomObjectMap(customObjectMap, args);
+        applyCustomObjectMap(obj, resolvedMap);
+        applyTopLevelCustomObjectArgs(obj, args);
         return obj;
     }
 
     @SuppressWarnings("unchecked")
+    private Map<String, Object> resolveNestedCustomObjectMap(@Nullable Map<String, Object> customObjectMap, Map<String, Object> args) {
+        if (customObjectMap != null) {
+            return customObjectMap;
+        }
+        Object nested = args.get(PARAM_CUSTOM_OBJECT_SNAKE);
+        if (nested instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        nested = args.get(PARAM_CUSTOM_OBJECT);
+        if (nested instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        return null;
+    }
+
+    private void applyCustomObjectMap(CustomObject obj, @Nullable Map<String, Object> customObjectMap) {
+        if (customObjectMap == null) {
+            return;
+        }
+        if (obj.getKey() == null && customObjectMap.get(PARAM_KEY) != null) {
+            obj.setKey(String.valueOf(customObjectMap.get(PARAM_KEY)));
+        }
+        if (obj.getTitle() == null && customObjectMap.get(PARAM_TITLE) != null) {
+            obj.setTitle(String.valueOf(customObjectMap.get(PARAM_TITLE)));
+        }
+        if (obj.getTitlePluralized() == null) {
+            Object tp = customObjectMap.get(PARAM_TITLE_PLURALIZED_SNAKE);
+            if (tp == null) {
+                tp = customObjectMap.get(PARAM_TITLE_PLURALIZED);
+            }
+            if (tp != null) {
+                obj.setTitlePluralized(String.valueOf(tp));
+            }
+        }
+        if (obj.getDescription() == null && customObjectMap.get(PARAM_DESCRIPTION) != null) {
+            obj.setDescription(String.valueOf(customObjectMap.get(PARAM_DESCRIPTION)));
+        }
+    }
+
+    private void applyTopLevelCustomObjectArgs(CustomObject obj, Map<String, Object> args) {
+        if (obj.getTitlePluralized() == null && args.containsKey(PARAM_TITLE_PLURALIZED_SNAKE) && args.get(PARAM_TITLE_PLURALIZED_SNAKE) != null) {
+            obj.setTitlePluralized(String.valueOf(args.get(PARAM_TITLE_PLURALIZED_SNAKE)));
+        }
+    }
+
     private CustomObjectRecord resolveCustomObjectRecord(
             @Nullable String name,
             @Nullable Map<String, Object> customObjectFields,
@@ -350,54 +402,89 @@ public class ZendeskCustomObjectTools {
             @Nullable Map<String, Object> customObjectRecordMap,
             @Nullable CallToolRequest request
     ) {
-        CustomObjectRecord record = new CustomObjectRecord();
-        record.setName(name);
-        record.setCustomObjectFields(customObjectFields);
-        record.setExternalId(externalId);
+        CustomObjectRecord recordObj = new CustomObjectRecord();
+        recordObj.setName(name);
+        recordObj.setCustomObjectFields(customObjectFields);
+        recordObj.setExternalId(externalId);
 
         Map<String, Object> args = request != null && request.arguments() != null ? request.arguments() : Collections.emptyMap();
+        Map<String, Object> resolvedMap = resolveNestedCustomObjectRecordMap(customObjectRecordMap, args);
+        applyCustomObjectRecordMap(recordObj, resolvedMap);
+        applyTopLevelRecordFields(recordObj, args);
+        applyTopLevelExternalId(recordObj, args);
+        return recordObj;
+    }
 
-        if (customObjectRecordMap == null) {
-            Object nested = args.get("custom_object_record");
-            if (nested instanceof Map<?, ?> m) {
-                customObjectRecordMap = (Map<String, Object>) m;
-            } else {
-                nested = args.get("customObjectRecord");
-                if (nested instanceof Map<?, ?> m) {
-                    customObjectRecordMap = (Map<String, Object>) m;
-                }
-            }
-        }
-
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> resolveNestedCustomObjectRecordMap(@Nullable Map<String, Object> customObjectRecordMap, Map<String, Object> args) {
         if (customObjectRecordMap != null) {
-            if (record.getName() == null && customObjectRecordMap.get("name") != null) {
-                record.setName(String.valueOf(customObjectRecordMap.get("name")));
-            }
-            if (record.getExternalId() == null) {
-                Object extId = customObjectRecordMap.get("external_id");
-                if (extId == null) extId = customObjectRecordMap.get("externalId");
-                if (extId != null) record.setExternalId(String.valueOf(extId));
-            }
-            if (record.getCustomObjectFields() == null) {
-                Object fields = customObjectRecordMap.get("custom_object_fields");
-                if (fields == null) fields = customObjectRecordMap.get("customObjectFields");
-                if (fields instanceof Map<?, ?> fieldsMap) {
-                    record.setCustomObjectFields((Map<String, Object>) fieldsMap);
-                }
-            }
+            return customObjectRecordMap;
         }
+        Object nested = args.get(PARAM_CUSTOM_OBJECT_RECORD_SNAKE);
+        if (nested instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        nested = args.get(PARAM_CUSTOM_OBJECT_RECORD);
+        if (nested instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        return null;
+    }
 
-        if (record.getCustomObjectFields() == null && args.containsKey("custom_object_fields") && args.get("custom_object_fields") instanceof Map<?, ?> m) {
-            record.setCustomObjectFields((Map<String, Object>) m);
-        } else if (record.getCustomObjectFields() == null && args.containsKey("customObjectFields") && args.get("customObjectFields") instanceof Map<?, ?> m) {
-            record.setCustomObjectFields((Map<String, Object>) m);
+    @SuppressWarnings("unchecked")
+    private void applyCustomObjectRecordMap(CustomObjectRecord recordObj, @Nullable Map<String, Object> customObjectRecordMap) {
+        if (customObjectRecordMap == null) {
+            return;
         }
-        if (record.getExternalId() == null && args.containsKey("external_id") && args.get("external_id") != null) {
-            record.setExternalId(String.valueOf(args.get("external_id")));
-        } else if (record.getExternalId() == null && args.containsKey("externalId") && args.get("externalId") != null) {
-            record.setExternalId(String.valueOf(args.get("externalId")));
+        if (recordObj.getName() == null && customObjectRecordMap.get(PARAM_NAME) != null) {
+            recordObj.setName(String.valueOf(customObjectRecordMap.get(PARAM_NAME)));
         }
+        if (recordObj.getExternalId() == null) {
+            Object extId = customObjectRecordMap.get(PARAM_EXTERNAL_ID_SNAKE);
+            if (extId == null) {
+                extId = customObjectRecordMap.get(PARAM_EXTERNAL_ID);
+            }
+            if (extId != null) {
+                recordObj.setExternalId(String.valueOf(extId));
+            }
+        }
+        if (recordObj.getCustomObjectFields() == null) {
+            Object fields = customObjectRecordMap.get(PARAM_CUSTOM_OBJECT_FIELDS_SNAKE);
+            if (fields == null) {
+                fields = customObjectRecordMap.get(PARAM_CUSTOM_OBJECT_FIELDS);
+            }
+            if (fields instanceof Map<?, ?> fieldsMap) {
+                recordObj.setCustomObjectFields((Map<String, Object>) fieldsMap);
+            }
+        }
+    }
 
-        return record;
+    @SuppressWarnings("unchecked")
+    private void applyTopLevelRecordFields(CustomObjectRecord recordObj, Map<String, Object> args) {
+        if (recordObj.getCustomObjectFields() != null) {
+            return;
+        }
+        Object fields = args.get(PARAM_CUSTOM_OBJECT_FIELDS_SNAKE);
+        if (fields instanceof Map<?, ?> m) {
+            recordObj.setCustomObjectFields((Map<String, Object>) m);
+            return;
+        }
+        fields = args.get(PARAM_CUSTOM_OBJECT_FIELDS);
+        if (fields instanceof Map<?, ?> m) {
+            recordObj.setCustomObjectFields((Map<String, Object>) m);
+        }
+    }
+
+    private void applyTopLevelExternalId(CustomObjectRecord recordObj, Map<String, Object> args) {
+        if (recordObj.getExternalId() != null) {
+            return;
+        }
+        Object extId = args.get(PARAM_EXTERNAL_ID_SNAKE);
+        if (extId == null) {
+            extId = args.get(PARAM_EXTERNAL_ID);
+        }
+        if (extId != null) {
+            recordObj.setExternalId(String.valueOf(extId));
+        }
     }
 }

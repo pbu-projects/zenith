@@ -33,6 +33,8 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
     private static final Logger log = LoggerFactory.getLogger(HttpClientResponseExceptionMcpErrorMapper.class);
     private static final String KEY_DESCRIPTION = "description";
+    private static final String KEY_MESSAGE = "message";
+    private static final String KEY_DETAILS = "details";
 
     private final ObjectMapper objectMapper;
 
@@ -200,41 +202,13 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
                 return (formatted != null && !formatted.isBlank()) ? formatted : null;
             }
             StringBuilder sb = new StringBuilder();
-
-            JsonNode errorNode = rootNode.get("error");
-            if (errorNode != null && !errorNode.isNull()) {
-                if (errorNode.isObject()) {
-                    String title = readTextValue(errorNode.get("title"));
-                    String msg = readTextValue(errorNode.get("message"));
-                    String desc = readTextValue(errorNode.get(KEY_DESCRIPTION));
-                    if (title != null) {
-                        sb.append(title);
-                    }
-                    appendDiagnosticMessage(sb, title, desc != null ? errorNode.get(KEY_DESCRIPTION) : null, msg != null ? errorNode.get("message") : null);
-                    JsonNode errDetails = errorNode.get("details");
-                    if (errDetails != null && !errDetails.isNull()) {
-                        appendWithSeparator(sb, ": ", formatDetails(errDetails));
-                    }
-                } else {
-                    String error = readTextValue(errorNode);
-                    if (error != null) {
-                        sb.append(error);
-                    }
-                }
-            }
-
-            JsonNode errorsNode = rootNode.get("errors");
-            if (errorsNode != null && !errorsNode.isNull()) {
-                String formattedErrors = errorsNode.isArray() ? formatArrayErrors(errorsNode) : formatDetails(errorsNode);
-                if (formattedErrors != null && !formattedErrors.isBlank()) {
-                    appendWithSeparator(sb, " - ", formattedErrors);
-                }
-            }
+            appendErrorNode(sb, rootNode.get("error"));
+            appendErrorsNode(sb, rootNode.get("errors"));
 
             String currentError = !sb.isEmpty() ? sb.toString() : null;
-            appendDiagnosticMessage(sb, currentError, rootNode.get(KEY_DESCRIPTION), rootNode.get("message"));
+            appendDiagnosticMessage(sb, currentError, rootNode.get(KEY_DESCRIPTION), rootNode.get(KEY_MESSAGE));
 
-            JsonNode detailsNode = rootNode.get("details");
+            JsonNode detailsNode = rootNode.get(KEY_DETAILS);
             if (detailsNode != null && !detailsNode.isNull()) {
                 appendWithSeparator(sb, ": ", formatDetails(detailsNode));
             }
@@ -245,42 +219,87 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         }
     }
 
+    private void appendErrorNode(StringBuilder sb, JsonNode errorNode) {
+        if (errorNode == null || errorNode.isNull()) {
+            return;
+        }
+        if (errorNode.isObject()) {
+            String title = readTextValue(errorNode.get("title"));
+            String msg = readTextValue(errorNode.get(KEY_MESSAGE));
+            String desc = readTextValue(errorNode.get(KEY_DESCRIPTION));
+            if (title != null) {
+                sb.append(title);
+            }
+            appendDiagnosticMessage(sb, title, desc != null ? errorNode.get(KEY_DESCRIPTION) : null, msg != null ? errorNode.get(KEY_MESSAGE) : null);
+            JsonNode errDetails = errorNode.get(KEY_DETAILS);
+            if (errDetails != null && !errDetails.isNull()) {
+                appendWithSeparator(sb, ": ", formatDetails(errDetails));
+            }
+        } else {
+            String error = readTextValue(errorNode);
+            if (error != null) {
+                sb.append(error);
+            }
+        }
+    }
+
+    private void appendErrorsNode(StringBuilder sb, JsonNode errorsNode) {
+        if (errorsNode == null || errorsNode.isNull()) {
+            return;
+        }
+        String formattedErrors = errorsNode.isArray() ? formatArrayErrors(errorsNode) : formatDetails(errorsNode);
+        if (formattedErrors != null && !formattedErrors.isBlank()) {
+            appendWithSeparator(sb, " - ", formattedErrors);
+        }
+    }
+
     private String formatArrayErrors(JsonNode arrayNode) {
         List<String> items = new ArrayList<>();
         for (JsonNode item : arrayNode.values()) {
-            if (item == null || item.isNull()) continue;
-            if (item.isObject()) {
-                StringBuilder itemSb = new StringBuilder();
-                String title = readTextValue(item.get("title"));
-                String code = readTextValue(item.get("code"));
-                String err = readTextValue(item.get("error"));
-                String header = title != null ? title : (code != null ? code : err);
-                if (header != null) {
-                    itemSb.append(header);
-                }
-
-                String desc = readTextValue(item.get(KEY_DESCRIPTION));
-                String msg = readTextValue(item.get("message"));
-                String detail = desc != null ? desc : msg;
-                if (detail != null && !detail.equals(header)) {
-                    appendWithSeparator(itemSb, ": ", detail);
-                }
-
-                JsonNode itemDetails = item.get("details");
-                if (itemDetails != null && !itemDetails.isNull()) {
-                    appendWithSeparator(itemSb, " - ", formatDetails(itemDetails));
-                }
-                if (!itemSb.isEmpty()) {
-                    items.add(itemSb.toString());
-                }
-            } else {
-                String text = item.coerceStringValue();
-                if (text != null && !text.isBlank()) {
-                    items.add(text);
-                }
+            if (item == null || item.isNull()) {
+                continue;
+            }
+            String formatted = formatArrayItem(item);
+            if (formatted != null && !formatted.isBlank()) {
+                items.add(formatted);
             }
         }
         return String.join("; ", items);
+    }
+
+    private String formatArrayItem(JsonNode item) {
+        if (!item.isObject()) {
+            String text = item.coerceStringValue();
+            return (text != null && !text.isBlank()) ? text : null;
+        }
+        StringBuilder itemSb = new StringBuilder();
+        String header = resolveItemHeader(item);
+        if (header != null) {
+            itemSb.append(header);
+        }
+        String desc = readTextValue(item.get(KEY_DESCRIPTION));
+        String msg = readTextValue(item.get(KEY_MESSAGE));
+        String detail = desc != null ? desc : msg;
+        if (detail != null && !detail.equals(header)) {
+            appendWithSeparator(itemSb, ": ", detail);
+        }
+        JsonNode itemDetails = item.get(KEY_DETAILS);
+        if (itemDetails != null && !itemDetails.isNull()) {
+            appendWithSeparator(itemSb, " - ", formatDetails(itemDetails));
+        }
+        return !itemSb.isEmpty() ? itemSb.toString() : null;
+    }
+
+    private String resolveItemHeader(JsonNode item) {
+        String title = readTextValue(item.get("title"));
+        if (title != null) {
+            return title;
+        }
+        String code = readTextValue(item.get("code"));
+        if (code != null) {
+            return code;
+        }
+        return readTextValue(item.get("error"));
     }
 
     private void appendDiagnosticMessage(StringBuilder sb, String error, JsonNode descNode, JsonNode msgNode) {
