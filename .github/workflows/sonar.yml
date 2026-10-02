@@ -4,8 +4,13 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
+      - '[0-9]+.*'
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -46,4 +51,4 @@ jobs:
           ZENDESK_CLIENT_ID: ${{ secrets.ZENDESK_CLIENT_ID }}
           ZENDESK_CLIENT_SECRET: ${{ secrets.ZENDESK_CLIENT_SECRET }}
           ZENDESK_OAUTH_SCOPE: ${{ secrets.ZENDESK_OAUTH_SCOPE }}
-        run: ./gradlew build sonar --info
+        run: ./gradlew build sonar --info -Dsonar.qualitygate.wait=true

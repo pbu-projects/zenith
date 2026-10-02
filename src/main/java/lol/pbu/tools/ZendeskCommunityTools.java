@@ -15,6 +15,7 @@ import lol.pbu.z4j.model.TopicResponse;
 import lol.pbu.z4j.model.TopicsResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 @Singleton
 public class ZendeskCommunityTools {
@@ -30,63 +31,63 @@ public class ZendeskCommunityTools {
     }
 
     @Tool(description = "List all Zendesk Community topics")
-    public TopicsResponse listCommunityTopics() {
+    public Mono<TopicsResponse> listCommunityTopics() {
         log.info("MCP Tool called: listCommunityTopics()");
-        return topicClient.listTopics().block();
+        return topicClient.listTopics();
     }
 
     @Tool(description = "Get details of a specific Zendesk Community topic by its numeric ID")
-    public TopicResponse getCommunityTopic(
+    public Mono<TopicResponse> getCommunityTopic(
             @ToolArg(description = "The numeric topic ID") Long topicId
     ) {
         log.info("MCP Tool called: getCommunityTopic(topicId={})", topicId);
         if (topicId == null) {
             throw new IllegalArgumentException("topicId is required");
         }
-        return topicClient.showTopic(topicId).block();
+        return topicClient.showTopic(topicId);
     }
 
     @Tool(description = "List Zendesk Community posts, optionally filtered by topic ID")
-    public PostsResponse listCommunityPosts(
+    public Mono<PostsResponse> listCommunityPosts(
             @ToolArg(description = "Optional topic ID to filter posts by") @Nullable Long topicId
     ) {
         log.info("MCP Tool called: listCommunityPosts(topicId={})", topicId);
         if (topicId != null) {
-            return postClient.listPostsByTopic(topicId).block();
+            return postClient.listPostsByTopic(topicId);
         }
-        return postClient.listPosts().block();
+        return postClient.listPosts();
     }
 
     @Tool(description = "Get details of a specific Zendesk Community post by its numeric ID")
-    public PostResponse getCommunityPost(
+    public Mono<PostResponse> getCommunityPost(
             @ToolArg(description = "The numeric post ID") Long postId
     ) {
         log.info("MCP Tool called: getCommunityPost(postId={})", postId);
         if (postId == null) {
             throw new IllegalArgumentException("postId is required");
         }
-        return postClient.showPost(postId).block();
+        return postClient.showPost(postId);
     }
 
     @Tool(description = "Search Zendesk Community posts matching a query string")
-    public CommunityPostSearchResponse searchCommunityPosts(
+    public Mono<CommunityPostSearchResponse> searchCommunityPosts(
             @ToolArg(description = "The search query string") String query
     ) {
         log.info("MCP Tool called: searchCommunityPosts(query='{}')", query);
         if (query == null || query.isBlank()) {
             throw new IllegalArgumentException("query cannot be null or blank");
         }
-        return postClient.searchPosts(query).block();
+        return postClient.searchPosts(query);
     }
 
     @Tool(description = "List comments for a specific Zendesk Community post by its numeric ID")
-    public PostCommentsResponse listCommunityPostComments(
+    public Mono<PostCommentsResponse> listCommunityPostComments(
             @ToolArg(description = "The numeric post ID") Long postId
     ) {
         log.info("MCP Tool called: listCommunityPostComments(postId={})", postId);
         if (postId == null) {
             throw new IllegalArgumentException("postId is required");
         }
-        return postClient.listPostComments(postId).block();
+        return postClient.listPostComments(postId);
     }
 }

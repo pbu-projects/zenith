@@ -12,6 +12,7 @@ import lol.pbu.z4j.model.ViewResponse;
 import lol.pbu.z4j.model.ViewsResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
 
 @Singleton
 public class ZendeskViewTools {
@@ -25,58 +26,58 @@ public class ZendeskViewTools {
     }
 
     @Tool(description = "List all views configured in Zendesk")
-    public ViewsResponse listViews() {
+    public Mono<ViewsResponse> listViews() {
         log.info("MCP Tool called: listViews()");
-        return viewClient.listViews().block();
+        return viewClient.listViews();
     }
 
     @Tool(description = "Get tickets from a specific Zendesk view by its numeric ID")
-    public TicketsResponse getViewTickets(
+    public Mono<TicketsResponse> getViewTickets(
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: getViewTickets(viewId={})", viewId);
         if (viewId == null) {
             throw new IllegalArgumentException("viewId is required");
         }
-        return viewClient.listTicketsForView(viewId).block();
+        return viewClient.listTicketsForView(viewId);
     }
 
     @Tool(description = "List only active views configured in Zendesk")
-    public ViewsResponse listActiveViews() {
+    public Mono<ViewsResponse> listActiveViews() {
         log.info("MCP Tool called: listActiveViews()");
-        return viewClient.listActiveViews().block();
+        return viewClient.listActiveViews();
     }
 
     @Tool(description = "Get details of a specific Zendesk view by its numeric ID")
-    public ViewResponse getView(
+    public Mono<ViewResponse> getView(
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: getView(viewId={})", viewId);
         if (viewId == null) {
             throw new IllegalArgumentException("viewId is required");
         }
-        return viewClient.showView(viewId).block();
+        return viewClient.showView(viewId);
     }
 
     @Tool(description = "Execute a specific Zendesk view by its numeric ID to retrieve ticket rows and columns")
-    public ViewExecuteResponse executeView(
+    public Mono<ViewExecuteResponse> executeView(
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: executeView(viewId={})", viewId);
         if (viewId == null) {
             throw new IllegalArgumentException("viewId is required");
         }
-        return viewClient.executeView(viewId).block();
+        return viewClient.executeView(viewId);
     }
 
     @Tool(description = "Get the ticket count for a specific Zendesk view by its numeric ID")
-    public ViewCountResponse getViewTicketCount(
+    public Mono<ViewCountResponse> getViewTicketCount(
             @ToolArg(description = "The numeric view ID") Long viewId
     ) {
         log.info("MCP Tool called: getViewTicketCount(viewId={})", viewId);
         if (viewId == null) {
             throw new IllegalArgumentException("viewId is required");
         }
-        return viewClient.countView(viewId).block();
+        return viewClient.countView(viewId);
     }
 }

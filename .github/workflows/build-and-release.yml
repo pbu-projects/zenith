@@ -17,8 +17,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sonar-gate:
+    name: Sonar Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Sonar Quality Gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "Waiting for Sonar Quality Gate on commit ${TARGET_SHA}..."
+          for i in $(seq 1 60); do
+            CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${TARGET_SHA}/check-runs" \
+              --jq '.check_runs[] | select(.name == "SonarCloud Code Analysis" or .name == "Sonar Analysis") | .conclusion' 2>/dev/null || true)
+
+            if echo "$CONCLUSION" | grep -q "success"; then
+              echo "Sonar Quality Gate passed successfully on commit ${TARGET_SHA}!"
+              exit 0
+            elif echo "$CONCLUSION" | grep -q "failure"; then
+              echo "Sonar Quality Gate failed on commit ${TARGET_SHA}!"
+              exit 1
+            fi
+
+            echo "Sonar check still pending (attempt $i/60). Waiting 10 seconds..."
+            sleep 10
+          done
+
+          echo "Timed out waiting for Sonar check on commit ${TARGET_SHA}."
+          exit 1
+
   build:
     name: Build (${{ matrix.os }})
+    needs: sonar-gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

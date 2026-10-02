@@ -8,7 +8,30 @@ import io.micronaut.http.client.exceptions.HttpClientResponseException
 import spock.lang.Shared
 import spock.lang.Specification
 
+import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import reactor.core.publisher.Mono
+
+class MonoUnwrappingWrapper implements GroovyInterceptable {
+    private final Object delegate
+
+    MonoUnwrappingWrapper(Object delegate) {
+        this.delegate = delegate
+    }
+
+    @Override
+    Object invokeMethod(String name, Object args) {
+        def res = delegate.invokeMethod(name, args)
+        if (res instanceof Mono) {
+            return ((Mono<?>) res).block()
+        }
+        return res
+    }
+
+    def propertyMissing(String name) {
+        return delegate."$name"
+    }
+}
 
 class ZendeskIntegrationSpec extends Specification {
 
@@ -19,16 +42,16 @@ class ZendeskIntegrationSpec extends Specification {
     ApplicationContext context
 
     @Shared
-    ZendeskHelpCenterTools helpCenterTools
+    def helpCenterTools
 
     @Shared
-    ZendeskCommunityTools communityTools
+    def communityTools
 
     @Shared
-    ZendeskViewTools viewTools
+    def viewTools
 
     @Shared
-    ZendeskTicketTools ticketTools
+    def ticketTools
 
     def setupSpec() {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
@@ -39,10 +62,10 @@ class ZendeskIntegrationSpec extends Specification {
                 "micronaut.http.services.zendesk.url": "http://127.0.0.1:${server.address.port}",
                 "micronaut.http.services.zendesk.oauth.token": "test-token"
         ])
-        helpCenterTools = context.getBean(ZendeskHelpCenterTools)
-        communityTools = context.getBean(ZendeskCommunityTools)
-        viewTools = context.getBean(ZendeskViewTools)
-        ticketTools = context.getBean(ZendeskTicketTools)
+        helpCenterTools = new MonoUnwrappingWrapper(context.getBean(ZendeskHelpCenterTools))
+        communityTools = new MonoUnwrappingWrapper(context.getBean(ZendeskCommunityTools))
+        viewTools = new MonoUnwrappingWrapper(context.getBean(ZendeskViewTools))
+        ticketTools = new MonoUnwrappingWrapper(context.getBean(ZendeskTicketTools))
     }
 
     def cleanupSpec() {
