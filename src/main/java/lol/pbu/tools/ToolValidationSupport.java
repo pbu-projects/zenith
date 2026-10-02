@@ -2,7 +2,6 @@ package lol.pbu.tools;
 
 import io.micronaut.core.annotation.Nullable;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
