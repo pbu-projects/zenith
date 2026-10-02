@@ -17,45 +17,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  sonar:
-    name: Sonar Analysis
+  sonar-gate:
+    name: Sonar Quality Gate
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          fetch-depth: 0  # Shallow clones should be disabled for accurate analysis
-
-      - name: Set up GraalVM CE (Java 25)
-        uses: graalvm/setup-graalvm@0426e2e191540e8514dff98dc52a5f5146a2a276 # v1.6.6
-        with:
-          java-version: '25'
-          distribution: 'graalvm-community'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache SonarCloud packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
-
-      - name: Build and analyze
+      - name: Wait for Sonar Quality Gate
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ZENDESK_URL: ${{ secrets.ZENDESK_URL }}
-          ZENDESK_CLIENT_ID: ${{ secrets.ZENDESK_CLIENT_ID }}
-          ZENDESK_CLIENT_SECRET: ${{ secrets.ZENDESK_CLIENT_SECRET }}
-          ZENDESK_OAUTH_SCOPE: ${{ secrets.ZENDESK_OAUTH_SCOPE }}
-        run: ./gradlew build sonar --info
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Waiting for Sonar Quality Gate on commit ${{ github.sha }}..."
+          for i in $(seq 1 60); do
+            CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs" \
+              --jq '.check_runs[] | select(.name == "SonarCloud Code Analysis" or .name == "Sonar Analysis") | .conclusion' 2>/dev/null || true)
+
+            if echo "$CONCLUSION" | grep -q "success"; then
+              echo "Sonar Quality Gate passed successfully on commit ${{ github.sha }}!"
+              exit 0
+            elif echo "$CONCLUSION" | grep -q "failure"; then
+              echo "Sonar Quality Gate failed on commit ${{ github.sha }}!"
+              exit 1
+            fi
+
+            echo "Sonar check still pending (attempt $i/60). Waiting 10 seconds..."
+            sleep 10
+          done
+
+          echo "Timed out waiting for Sonar check on commit ${{ github.sha }}."
+          exit 1
 
   build:
     name: Build (${{ matrix.os }})
-    needs: sonar
+    needs: sonar-gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
