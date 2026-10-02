@@ -68,6 +68,7 @@ public class ZenithMcpAsyncServerFactory {
 
     @Singleton
     @Replaces(McpAsyncServer.class)
+    @SuppressWarnings("java:S107")
     public McpAsyncServer createMcpAsyncServer(
             McpServerTransportProvider transportProvider,
             McpJsonMapper mcpJsonMapper,
@@ -160,7 +161,7 @@ public class ZenithMcpAsyncServerFactory {
         return spec.build();
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"java:S107", "unchecked"})
     private static <B> Mono<CallToolResult> invokeTool(
             BeanDefinition<?> rawBeanDefinition,
             ExecutableMethod<?, ?> rawMethod,
@@ -185,33 +186,34 @@ public class ZenithMcpAsyncServerFactory {
             if (request != null) {
                 candidates.add(request);
             }
+            CallToolRequest safeRequest = request != null ? request : new CallToolRequest("", Map.of());
 
             Map<Argument<?>, Object> boundVariables = prepareBoundVariables(method.getArguments(), candidates);
             DefaultExecutableBinder<CallToolRequest> binder = new DefaultExecutableBinder<>(boundVariables);
-            BoundExecutable<B, ?> bound = binder.bind(method, argumentBinderRegistry, request);
+            BoundExecutable<B, ?> bound = binder.bind(method, argumentBinderRegistry, safeRequest);
             Object rawResult = bound.invoke(bean);
 
-            if (rawResult instanceof Publisher<?> publisher) {
-                return Mono.from(publisher)
+            return switch (rawResult) {
+                case Publisher<?> publisher -> Mono.from(publisher)
                         .map(payload -> serializeResult(payload, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader))
                         .defaultIfEmpty(CallToolResult.builder().isError(false).build())
                         .onErrorResume(error -> Mono.error(mapException(error, exceptionMappers)));
-            } else if (rawResult instanceof CompletableFuture<?> cf) {
-                return Mono.fromFuture(cf)
+                case CompletableFuture<?> cf -> Mono.fromFuture(cf)
                         .map(payload -> serializeResult(payload, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader))
                         .defaultIfEmpty(CallToolResult.builder().isError(false).build())
                         .onErrorResume(error -> Mono.error(mapException(error, exceptionMappers)));
-            } else {
-                CallToolResult result = serializeResult(rawResult, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader);
-                return Mono.just(result);
-            }
-        } catch (Throwable ex) {
+                case null, default -> {
+                    CallToolResult result = serializeResult(rawResult, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader);
+                    yield Mono.just(result);
+                }
+            };
+        } catch (Exception ex) {
             return Mono.error(mapException(ex, exceptionMappers));
         }
     }
 
     private static Map<Argument<?>, Object> prepareBoundVariables(Argument<?>[] arguments, List<Object> candidates) {
-        Map<Argument<?>, Object> bound = new HashMap<>(arguments.length);
+        Map<Argument<?>, Object> bound = HashMap.newHashMap(arguments.length);
         for (Argument<?> argument : arguments) {
             Class<?> argType = argument.getType();
             for (Object candidate : candidates) {

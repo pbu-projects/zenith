@@ -1,19 +1,14 @@
 package lol.pbu.mcp
 
 import io.micronaut.context.ApplicationContext
-import io.micronaut.mcp.annotations.Tool
-import io.micronaut.mcp.annotations.ToolArg
 import io.modelcontextprotocol.server.McpAsyncServer
 import io.modelcontextprotocol.server.McpServerFeatures.AsyncToolSpecification
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult
 import io.modelcontextprotocol.spec.McpSchema.TextContent
-import jakarta.inject.Singleton
 import reactor.core.publisher.Mono
 import spock.lang.Specification
-
-import java.util.concurrent.CompletableFuture
 
 class ReactiveToolExecutionSpec extends Specification {
 

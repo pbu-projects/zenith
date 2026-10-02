@@ -77,6 +77,8 @@ public class ZendeskTicketTools {
     private static final String PARAM_CUSTOM_STATUS_ID_SNAKE = "custom_status_id";
     private static final String PARAM_TICKET_FORM_ID = "ticketFormId";
     private static final String PARAM_TICKET_FORM_ID_SNAKE = "ticket_form_id";
+    private static final String COULD_NOT_BE_RETRIEVED = " could not be retrieved. Does it exist?";
+    private static final String TARGET_PROBLEM_TICKET_PREFIX = "Target problem ticket #";
 
     private final TicketClient ticketClient;
     private final AttachmentClient attachmentClient;
@@ -552,11 +554,11 @@ public class ZendeskTicketTools {
             return Mono.error(new IllegalArgumentException("problemId must be a positive integer, got: " + problemId));
         }
         return ticketClient.showTicket(problemId)
-                .switchIfEmpty(Mono.error(new IllegalArgumentException("Target problem ticket #" + problemId + " could not be retrieved. Does it exist?")))
+                .switchIfEmpty(Mono.error(new IllegalArgumentException(TARGET_PROBLEM_TICKET_PREFIX + problemId + COULD_NOT_BE_RETRIEVED)))
                 .flatMap(resp -> {
                     Ticket problemTicket = resp != null ? resp.getTicket() : null;
                     if (problemTicket == null) {
-                        return Mono.error(new IllegalArgumentException("Target problem ticket #" + problemId + " could not be retrieved. Does it exist?"));
+                        return Mono.error(new IllegalArgumentException(TARGET_PROBLEM_TICKET_PREFIX + problemId + COULD_NOT_BE_RETRIEVED));
                     }
                     if (problemTicket.getType() != TicketType.PROBLEM) {
                         return Mono.error(new IllegalArgumentException("Target ticket #" + problemId + " is not of type 'problem'"));
@@ -567,7 +569,7 @@ public class ZendeskTicketTools {
                     if (e instanceof IllegalArgumentException) {
                         return Mono.error(e);
                     }
-                    return Mono.error(new IllegalArgumentException("Target problem ticket #" + problemId + " could not be retrieved. Does it exist?", e));
+                    return Mono.error(new IllegalArgumentException(TARGET_PROBLEM_TICKET_PREFIX + problemId + COULD_NOT_BE_RETRIEVED, e));
                 });
     }
 
@@ -1092,10 +1094,10 @@ public class ZendeskTicketTools {
             return Mono.just(input);
         }
         return showMono
-                .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?")))
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Ticket #" + id + COULD_NOT_BE_RETRIEVED)))
                 .flatMap(resp -> {
                     if (resp.getTicket() == null) {
-                        return Mono.error(new IllegalArgumentException("Ticket #" + id + " could not be retrieved. Does it exist?"));
+                        return Mono.error(new IllegalArgumentException("Ticket #" + id + COULD_NOT_BE_RETRIEVED));
                     }
                     Ticket currentTicket = resp.getTicket();
                     validateTicketState(id, currentTicket, options, input, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus);
