@@ -269,8 +269,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
     private String formatArrayItem(JsonNode item) {
         if (!item.isObject()) {
-            String text = item.coerceStringValue();
-            return (text != null && !text.isBlank()) ? text : null;
+            return readTextValue(item);
         }
         StringBuilder itemSb = new StringBuilder();
         String header = resolveItemHeader(item);

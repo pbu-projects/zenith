@@ -296,7 +296,7 @@ public class ZendeskCustomObjectTools {
             throw new IllegalArgumentException("recordId is required when deleting a custom object record.");
         }
         customObjectRecordsClient.deleteCustomObjectRecord(customObjectKey, recordId).block();
-        return Map.of("success", true, "customObjectKey", customObjectKey, "deletedRecordId", recordId);
+        return Map.of("success", true, PARAM_CUSTOM_OBJECT_KEY, customObjectKey, "deletedRecordId", recordId);
     }
 
     public Map<String, Object> deleteCustomObjectRecord(String customObjectKey, String recordId) {
@@ -362,11 +362,11 @@ public class ZendeskCustomObjectTools {
         if (nested instanceof Map<?, ?> m) {
             return (Map<String, Object>) m;
         }
-        return null;
+        return Collections.emptyMap();
     }
 
-    private void applyCustomObjectMap(CustomObject obj, @Nullable Map<String, Object> customObjectMap) {
-        if (customObjectMap == null) {
+    private void applyCustomObjectMap(CustomObject obj, Map<String, Object> customObjectMap) {
+        if (customObjectMap == null || customObjectMap.isEmpty()) {
             return;
         }
         if (obj.getKey() == null && customObjectMap.get(PARAM_KEY) != null) {
@@ -428,12 +428,12 @@ public class ZendeskCustomObjectTools {
         if (nested instanceof Map<?, ?> m) {
             return (Map<String, Object>) m;
         }
-        return null;
+        return Collections.emptyMap();
     }
 
     @SuppressWarnings("unchecked")
-    private void applyCustomObjectRecordMap(CustomObjectRecord recordObj, @Nullable Map<String, Object> customObjectRecordMap) {
-        if (customObjectRecordMap == null) {
+    private void applyCustomObjectRecordMap(CustomObjectRecord recordObj, Map<String, Object> customObjectRecordMap) {
+        if (customObjectRecordMap == null || customObjectRecordMap.isEmpty()) {
             return;
         }
         if (recordObj.getName() == null && customObjectRecordMap.get(PARAM_NAME) != null) {
