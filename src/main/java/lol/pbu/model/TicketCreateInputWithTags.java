@@ -19,31 +19,22 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.serde.annotation.Serdeable;
-import lol.pbu.z4j.model.TicketUpdateInput;
+import lol.pbu.z4j.model.TicketComment;
+import lol.pbu.z4j.model.TicketCreateInput;
 
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Extension of {@link TicketUpdateInput} that includes the optional {@code ticket_form_id},
- * {@code additional_tags}, and {@code remove_tags} attributes for ticket update and batch update operations.
- *
- * <p><b>Technical Debt Note:</b> This subclass is a temporary bridge because {@code lol.pbu:z4j}
- * currently lacks {@code ticket_form_id}, {@code additional_tags}, and {@code remove_tags} on the
- * upstream {@link TicketUpdateInput}. Once these are addressed upstream in {@code z4j}, this class
- * can be deprecated and removed in favor of the upstream model.</p>
+ * Extension of {@link TicketCreateInput} that includes optional {@code additional_tags} and
+ * {@code remove_tags} attributes for ticket creation operations.
  */
 @Serdeable
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class TicketUpdateInputWithForm extends TicketUpdateInput {
+public class TicketCreateInputWithTags extends TicketCreateInput {
 
-    public static final String JSON_PROPERTY_TICKET_FORM_ID = "ticket_form_id";
     public static final String JSON_PROPERTY_ADDITIONAL_TAGS = "additional_tags";
     public static final String JSON_PROPERTY_REMOVE_TAGS = "remove_tags";
-
-    @Nullable
-    @JsonProperty(JSON_PROPERTY_TICKET_FORM_ID)
-    private Long ticketFormId;
 
     @Nullable
     @JsonProperty(JSON_PROPERTY_ADDITIONAL_TAGS)
@@ -53,26 +44,19 @@ public class TicketUpdateInputWithForm extends TicketUpdateInput {
     @JsonProperty(JSON_PROPERTY_REMOVE_TAGS)
     private List<String> removeTags;
 
-    public TicketUpdateInputWithForm() {
+    public TicketCreateInputWithTags() {
         super();
     }
 
-    @Override
-    public @Nullable Long getTicketFormId() {
-        return ticketFormId;
-    }
-
-    @Override
-    public TicketUpdateInputWithForm setTicketFormId(@Nullable Long ticketFormId) {
-        this.ticketFormId = ticketFormId;
-        return this;
+    public TicketCreateInputWithTags(TicketComment comment) {
+        super(comment);
     }
 
     public @Nullable List<String> getAdditionalTags() {
         return additionalTags;
     }
 
-    public TicketUpdateInputWithForm setAdditionalTags(@Nullable List<String> additionalTags) {
+    public TicketCreateInputWithTags setAdditionalTags(@Nullable List<String> additionalTags) {
         this.additionalTags = additionalTags;
         return this;
     }
@@ -81,7 +65,7 @@ public class TicketUpdateInputWithForm extends TicketUpdateInput {
         return removeTags;
     }
 
-    public TicketUpdateInputWithForm setRemoveTags(@Nullable List<String> removeTags) {
+    public TicketCreateInputWithTags setRemoveTags(@Nullable List<String> removeTags) {
         this.removeTags = removeTags;
         return this;
     }
@@ -89,21 +73,20 @@ public class TicketUpdateInputWithForm extends TicketUpdateInput {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof TicketUpdateInputWithForm that)) return false;
+        if (!(o instanceof TicketCreateInputWithTags that)) return false;
         if (!super.equals(o)) return false;
-        return Objects.equals(ticketFormId, that.ticketFormId)
-                && Objects.equals(additionalTags, that.additionalTags)
+        return Objects.equals(additionalTags, that.additionalTags)
                 && Objects.equals(removeTags, that.removeTags);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), ticketFormId, additionalTags, removeTags);
+        return Objects.hash(super.hashCode(), additionalTags, removeTags);
     }
 
     @Override
     public String toString() {
-        return "TicketUpdateInputWithForm(super=" + super.toString() + ", ticketFormId=" + ticketFormId
+        return "TicketCreateInputWithTags(super=" + super.toString()
                 + ", additionalTags=" + additionalTags + ", removeTags=" + removeTags + ")";
     }
 }

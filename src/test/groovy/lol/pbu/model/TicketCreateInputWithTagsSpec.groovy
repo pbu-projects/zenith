@@ -15,76 +15,63 @@
  */
 package lol.pbu.model
 
+import io.micronaut.serde.ObjectMapper
 import io.micronaut.test.extensions.spock.annotation.MicronautTest
 import jakarta.inject.Inject
-import io.micronaut.serde.ObjectMapper
 import lol.pbu.z4j.model.TicketComment
 import lol.pbu.z4j.model.TicketUpdateInputPriority
 import spock.lang.Specification
 
 @MicronautTest
-class TicketUpdateInputWithFormSpec extends Specification {
+class TicketCreateInputWithTagsSpec extends Specification {
 
     @Inject
     ObjectMapper objectMapper
 
-    def "getter and setter for ticketFormId and tags operate as expected"() {
+    def "getter and setter for additionalTags and removeTags operate as expected"() {
         given:
-        def input = new TicketUpdateInputWithForm()
+        def input = new TicketCreateInputWithTags()
 
         expect:
-        input.ticketFormId == null
         input.additionalTags == null
         input.removeTags == null
 
         when:
-        input.setTicketFormId(1001L)
         input.setAdditionalTags(["tag1", "tag2"])
         input.setRemoveTags(["tag3"])
 
         then:
-        input.ticketFormId == 1001L
         input.additionalTags == ["tag1", "tag2"]
         input.removeTags == ["tag3"]
     }
 
     def "equals and hashCode contract verification"() {
         given:
-        def base = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1001L
+        def comment = new TicketComment().tap { body = "Initial" }
+        def base = new TicketCreateInputWithTags(comment).tap {
             priority = TicketUpdateInputPriority.HIGH
             additionalTags = ["alpha"]
             removeTags = ["beta"]
         }
-        def same = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1001L
+        def same = new TicketCreateInputWithTags(comment).tap {
             priority = TicketUpdateInputPriority.HIGH
             additionalTags = ["alpha"]
             removeTags = ["beta"]
         }
-        def diffForm = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1002L
+        def diffAdditional = new TicketCreateInputWithTags(comment).tap {
             priority = TicketUpdateInputPriority.HIGH
-            additionalTags = ["alpha"]
+            additionalTags = ["gamma"]
             removeTags = ["beta"]
         }
-        def diffSuper = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1001L
+        def diffRemove = new TicketCreateInputWithTags(comment).tap {
+            priority = TicketUpdateInputPriority.HIGH
+            additionalTags = ["alpha"]
+            removeTags = ["delta"]
+        }
+        def diffSuper = new TicketCreateInputWithTags(comment).tap {
             priority = TicketUpdateInputPriority.LOW
             additionalTags = ["alpha"]
             removeTags = ["beta"]
-        }
-        def diffAdditional = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1001L
-            priority = TicketUpdateInputPriority.HIGH
-            additionalTags = ["other"]
-            removeTags = ["beta"]
-        }
-        def diffRemove = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1001L
-            priority = TicketUpdateInputPriority.HIGH
-            additionalTags = ["alpha"]
-            removeTags = ["other"]
         }
 
         expect:
@@ -93,18 +80,16 @@ class TicketUpdateInputWithFormSpec extends Specification {
         base.hashCode() == same.hashCode()
         base != null
         base != "not a ticket input"
-        base != diffForm
-        base != diffSuper
         base != diffAdditional
         base != diffRemove
-        base.hashCode() != diffForm.hashCode()
+        base != diffSuper
         base.hashCode() != diffAdditional.hashCode()
+        base.hashCode() != diffRemove.hashCode()
     }
 
-    def "toString representation includes ticketFormId, tags, and super fields"() {
+    def "toString representation includes tags and super fields"() {
         given:
-        def input = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1001L
+        def input = new TicketCreateInputWithTags().tap {
             additionalTags = ["tag1"]
             removeTags = ["tag2"]
         }
@@ -113,29 +98,29 @@ class TicketUpdateInputWithFormSpec extends Specification {
         def str = input.toString()
 
         then:
-        str.contains("TicketUpdateInputWithForm")
-        str.contains("ticketFormId=1001")
+        str.contains("TicketCreateInputWithTags")
         str.contains("additionalTags=[tag1]")
         str.contains("removeTags=[tag2]")
         str.contains("super=")
     }
 
-    def "serde serialization writes ticket_form_id, additional_tags, and remove_tags properties"() {
+    def "serde serialization writes additional_tags and remove_tags properties"() {
         given:
-        def input = new TicketUpdateInputWithForm().tap {
-            ticketFormId = 1001L
-            additionalTags = ["urgency", "vip"]
-            removeTags = ["stale"]
-            comment = new TicketComment().tap { body = "Test comment" }
+        def input = new TicketCreateInputWithTags(new TicketComment().tap { body = "Create test" }).tap {
+            subject = "Subject test"
+            tags = ["main_tag"]
+            additionalTags = ["created_tag"]
+            removeTags = ["old_tag"]
         }
 
         when:
         def json = objectMapper.writeValueAsString(input)
 
         then:
-        json.contains('"ticket_form_id":1001')
-        json.contains('"additional_tags":["urgency","vip"]')
-        json.contains('"remove_tags":["stale"]')
-        json.contains('"body":"Test comment"')
+        json.contains('"subject":"Subject test"')
+        json.contains('"tags":["main_tag"]')
+        json.contains('"additional_tags":["created_tag"]')
+        json.contains('"remove_tags":["old_tag"]')
+        json.contains('"body":"Create test"')
     }
 }

@@ -41,11 +41,52 @@ public record TicketMutationOptions(
         @Nullable Long requesterId,
         @Nullable String type,
         @Nullable Long customStatusId,
-        @Nullable Long ticketFormId
+        @Nullable Long ticketFormId,
+        @Nullable List<String> additionalTags,
+        @Nullable List<String> removeTags,
+        @Nullable List<String> tags
 ) {
+
+    public TicketMutationOptions(
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId
+    ) {
+        this(comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, null, null, null);
+    }
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    public Builder toBuilder() {
+        return new Builder()
+                .comment(comment)
+                .status(status)
+                .priority(priority)
+                .isPublic(isPublic)
+                .uploadTokens(uploadTokens)
+                .attachmentFilePaths(attachmentFilePaths)
+                .problemId(problemId)
+                .convertToIncident(convertToIncident)
+                .customFields(customFields)
+                .requesterId(requesterId)
+                .type(type)
+                .customStatusId(customStatusId)
+                .ticketFormId(ticketFormId)
+                .additionalTags(additionalTags)
+                .removeTags(removeTags)
+                .tags(tags);
     }
 
     public static final class Builder {
@@ -62,6 +103,9 @@ public record TicketMutationOptions(
         private String type;
         private Long customStatusId;
         private Long ticketFormId;
+        private List<String> additionalTags;
+        private List<String> removeTags;
+        private List<String> tags;
 
         public Builder comment(@Nullable String comment) {
             this.comment = comment;
@@ -128,6 +172,21 @@ public record TicketMutationOptions(
             return this;
         }
 
+        public Builder additionalTags(@Nullable List<String> additionalTags) {
+            this.additionalTags = additionalTags;
+            return this;
+        }
+
+        public Builder removeTags(@Nullable List<String> removeTags) {
+            this.removeTags = removeTags;
+            return this;
+        }
+
+        public Builder tags(@Nullable List<String> tags) {
+            this.tags = tags;
+            return this;
+        }
+
         public TicketMutationOptions build() {
             return new TicketMutationOptions(
                     comment,
@@ -142,7 +201,10 @@ public record TicketMutationOptions(
                     requesterId,
                     type,
                     customStatusId,
-                    ticketFormId
+                    ticketFormId,
+                    additionalTags,
+                    removeTags,
+                    tags
             );
         }
     }
