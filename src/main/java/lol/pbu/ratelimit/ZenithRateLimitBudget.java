@@ -46,84 +46,132 @@ public class ZenithRateLimitBudget {
         long configWindow = config != null ? config.getMaxWindowSeconds() : ZenithRateLimitConfiguration.DEFAULT_MAX_WINDOW_SECONDS;
         boolean configIsFailFast = config != null && config.isFailFast();
 
-        String explicitArgMode = null;
-        Long explicitArgWindow = null;
+        String explicitArgMode = extractExplicitMode(arguments);
+        Long explicitArgWindow = extractExplicitWindow(arguments);
 
-        if (arguments != null) {
-            Object argMode = arguments.get("rateLimitMode");
-            if (argMode == null) {
-                argMode = arguments.get("rate_limit_mode");
-            }
-            if (argMode instanceof String str && !str.isBlank()) {
-                explicitArgMode = str.trim();
-            }
+        ResolvedBudget resolved = resolveBudgetSettings(configMode, configWindow, configIsFailFast, explicitArgMode, explicitArgWindow);
+        return new ZenithRateLimitBudget(Instant.now(), Duration.ofSeconds(resolved.window()), resolved.mode(), resolved.warning());
+    }
 
-            Object argWindow = arguments.get("rateLimitWindow");
-            if (argWindow == null) {
-                argWindow = arguments.get("rate_limit_window");
-            }
-            if (argWindow == null) {
-                argWindow = arguments.get("windowSeconds");
-            }
-            if (argWindow == null) {
-                argWindow = arguments.get("window_seconds");
-            }
-            if (argWindow instanceof Number num) {
-                explicitArgWindow = num.longValue();
-            } else if (argWindow instanceof String str && !str.isBlank()) {
-                try {
-                    explicitArgWindow = Long.parseLong(str.trim());
-                } catch (NumberFormatException _) {
-                    // Ignore malformed override, fallback to configured window
-                }
-            }
-        }
-
-        String effectiveMode;
-        long effectiveWindow;
-        String warning = null;
-
-        boolean argIsFailFast = explicitArgMode != null && isFailFastMode(explicitArgMode);
-
+    private static ResolvedBudget resolveBudgetSettings(
+            String configMode,
+            long configWindow,
+            boolean configIsFailFast,
+            @Nullable String explicitArgMode,
+            @Nullable Long explicitArgWindow
+    ) {
         if (explicitArgMode != null && explicitArgWindow != null) {
-            effectiveMode = explicitArgMode;
-            effectiveWindow = explicitArgWindow;
-            if (argIsFailFast) {
-                warning = String.format("Tool call specified rateLimitMode='%s' alongside a retry window of %ds. In fail-fast mode, retries are disabled and the window is not used.", explicitArgMode, explicitArgWindow);
-                log.warn("{}", warning);
-            } else if (configIsFailFast) {
-                warning = String.format("Tool call argument rateLimitMode='%s' (with window %ds) overrides configured environment mode '%s'.", explicitArgMode, explicitArgWindow, configMode);
-                log.warn("{}", warning);
-            } else if (explicitArgWindow != configWindow) {
+            return resolveBothArgsProvided(configMode, configWindow, configIsFailFast, explicitArgMode, explicitArgWindow);
+        }
+        if (explicitArgMode != null) {
+            return resolveModeArgOnly(configMode, configWindow, configIsFailFast, explicitArgMode);
+        }
+        if (explicitArgWindow != null) {
+            return resolveWindowArgOnly(configMode, configWindow, configIsFailFast, explicitArgWindow);
+        }
+        return new ResolvedBudget(configMode, configWindow, null);
+    }
+
+    private static ResolvedBudget resolveBothArgsProvided(
+            String configMode,
+            long configWindow,
+            boolean configIsFailFast,
+            String explicitArgMode,
+            long explicitArgWindow
+    ) {
+        boolean argIsFailFast = isFailFastMode(explicitArgMode);
+        String warning = null;
+        if (argIsFailFast) {
+            warning = String.format("Tool call specified rateLimitMode='%s' alongside a retry window of %ds. In fail-fast mode, retries are disabled and the window is not used.", explicitArgMode, explicitArgWindow);
+            log.warn("{}", warning);
+        } else if (configIsFailFast) {
+            warning = String.format("Tool call argument rateLimitMode='%s' (with window %ds) overrides configured environment mode '%s'.", explicitArgMode, explicitArgWindow, configMode);
+            log.warn("{}", warning);
+        } else if (explicitArgWindow != configWindow) {
+            warning = String.format("Tool call argument rateLimitWindow=%ds overrides configured environment window of %ds.", explicitArgWindow, configWindow);
+            log.warn("{}", warning);
+        }
+        return new ResolvedBudget(explicitArgMode, explicitArgWindow, warning);
+    }
+
+    private static ResolvedBudget resolveModeArgOnly(
+            String configMode,
+            long configWindow,
+            boolean configIsFailFast,
+            String explicitArgMode
+    ) {
+        boolean argIsFailFast = isFailFastMode(explicitArgMode);
+        String warning = null;
+        if (argIsFailFast != configIsFailFast) {
+            warning = String.format("Tool call argument rateLimitMode='%s' overrides configured environment mode '%s'.", explicitArgMode, configMode);
+            log.warn("{}", warning);
+        }
+        return new ResolvedBudget(explicitArgMode, configWindow, warning);
+    }
+
+    private static ResolvedBudget resolveWindowArgOnly(
+            String configMode,
+            long configWindow,
+            boolean configIsFailFast,
+            long explicitArgWindow
+    ) {
+        String effectiveMode;
+        String warning = null;
+        if (configIsFailFast) {
+            effectiveMode = ZenithRateLimitConfiguration.MODE_RETRY;
+            warning = String.format("Rate limit mode was configured as '%s' via environment, but tool argument specified a retry window of %ds. Overriding mode to 'retry' bounded by %ds.", configMode, explicitArgWindow, explicitArgWindow);
+            log.warn("{}", warning);
+        } else {
+            effectiveMode = configMode;
+            if (explicitArgWindow != configWindow) {
                 warning = String.format("Tool call argument rateLimitWindow=%ds overrides configured environment window of %ds.", explicitArgWindow, configWindow);
                 log.warn("{}", warning);
             }
-        } else if (explicitArgMode != null) {
-            effectiveMode = explicitArgMode;
-            effectiveWindow = configWindow;
-            if (argIsFailFast != configIsFailFast) {
-                warning = String.format("Tool call argument rateLimitMode='%s' overrides configured environment mode '%s'.", explicitArgMode, configMode);
-                log.warn("{}", warning);
-            }
-        } else if (explicitArgWindow != null) {
-            effectiveWindow = explicitArgWindow;
-            if (configIsFailFast) {
-                effectiveMode = ZenithRateLimitConfiguration.MODE_RETRY;
-                warning = String.format("Rate limit mode was configured as '%s' via environment, but tool argument specified a retry window of %ds. Overriding mode to 'retry' bounded by %ds.", configMode, explicitArgWindow, explicitArgWindow);
-                log.warn("{}", warning);
-            } else {
-                effectiveMode = configMode;
-                if (explicitArgWindow != configWindow) {
-                    warning = String.format("Tool call argument rateLimitWindow=%ds overrides configured environment window of %ds.", explicitArgWindow, configWindow);
-                    log.warn("{}", warning);
-                }
-            }
-        } else {
-            effectiveMode = configMode;
-            effectiveWindow = configWindow;
         }
+        return new ResolvedBudget(effectiveMode, explicitArgWindow, warning);
+    }
 
-        return new ZenithRateLimitBudget(Instant.now(), Duration.ofSeconds(effectiveWindow), effectiveMode, warning);
+    @Nullable
+    private static String extractExplicitMode(@Nullable Map<String, Object> arguments) {
+        if (arguments == null) {
+            return null;
+        }
+        Object argMode = arguments.get("rateLimitMode");
+        if (argMode == null) {
+            argMode = arguments.get("rate_limit_mode");
+        }
+        if (argMode instanceof String str && !str.isBlank()) {
+            return str.trim();
+        }
+        return null;
+    }
+
+    @Nullable
+    private static Long extractExplicitWindow(@Nullable Map<String, Object> arguments) {
+        if (arguments == null) {
+            return null;
+        }
+        Object argWindow = arguments.get("rateLimitWindow");
+        if (argWindow == null) {
+            argWindow = arguments.get("rate_limit_window");
+        }
+        if (argWindow == null) {
+            argWindow = arguments.get("windowSeconds");
+        }
+        if (argWindow == null) {
+            argWindow = arguments.get("window_seconds");
+        }
+        if (argWindow instanceof Number num) {
+            return num.longValue();
+        }
+        if (argWindow instanceof String str && !str.isBlank()) {
+            try {
+                return Long.parseLong(str.trim());
+            } catch (NumberFormatException _) {
+                // Ignore malformed override
+            }
+        }
+        return null;
     }
 
     public static ZenithRateLimitBudget getCurrentBudget() {
@@ -188,5 +236,8 @@ public class ZenithRateLimitBudget {
             return true;
         }
         return getElapsedTime().plus(waitDuration).compareTo(maxWindow) <= 0;
+    }
+
+    private record ResolvedBudget(String mode, long window, @Nullable String warning) {
     }
 }

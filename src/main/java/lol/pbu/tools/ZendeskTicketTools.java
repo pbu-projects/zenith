@@ -205,10 +205,10 @@ public class ZendeskTicketTools {
                 .toList();
         if (!missingIds.isEmpty()) {
             if (missingIds.size() == 1) {
-                throw new RuntimeException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", missingIds.get(0)));
+                throw new IllegalStateException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", missingIds.get(0)));
             }
             String missingStr = missingIds.stream().map(Object::toString).collect(Collectors.joining(", "));
-            throw new RuntimeException(String.format("Failed to fetch tickets [%s]: [EmptyResult] Tickets not found", missingStr));
+            throw new IllegalStateException(String.format("Failed to fetch tickets [%s]: [EmptyResult] Tickets not found", missingStr));
         }
         return new TicketsResponse(allTickets);
     }
@@ -223,30 +223,37 @@ public class ZendeskTicketTools {
     private int resolveChunkSize(@Nullable Integer chunkSize, @Nullable CallToolRequest request) {
         Integer requested = chunkSize;
         if (requested == null && request != null && request.arguments() != null) {
-            Object val = request.arguments().get(PARAM_CHUNK_SIZE);
-            if (val == null) {
-                val = request.arguments().get(PARAM_CHUNK_SIZE_SNAKE);
-            }
-            if (val == null) {
-                val = request.arguments().get(PARAM_BATCH_SIZE);
-            }
-            if (val == null) {
-                val = request.arguments().get(PARAM_BATCH_SIZE_SNAKE);
-            }
-            if (val instanceof Number num) {
-                requested = num.intValue();
-            } else if (val != null) {
-                try {
-                    requested = Integer.parseInt(val.toString().trim());
-                } catch (NumberFormatException _) {
-                    log.warn("Invalid chunkSize parameter format: {}", val);
-                }
-            }
+            requested = extractChunkSizeFromArgs(request.arguments());
         }
         if (requested != null && requested > 0) {
             return Math.min(requested, MAX_TICKET_CHUNK_SIZE);
         }
         return this.defaultChunkSize;
+    }
+
+    @Nullable
+    private Integer extractChunkSizeFromArgs(Map<String, Object> arguments) {
+        Object val = arguments.get(PARAM_CHUNK_SIZE);
+        if (val == null) {
+            val = arguments.get(PARAM_CHUNK_SIZE_SNAKE);
+        }
+        if (val == null) {
+            val = arguments.get(PARAM_BATCH_SIZE);
+        }
+        if (val == null) {
+            val = arguments.get(PARAM_BATCH_SIZE_SNAKE);
+        }
+        if (val instanceof Number num) {
+            return num.intValue();
+        }
+        if (val != null) {
+            try {
+                return Integer.parseInt(val.toString().trim());
+            } catch (NumberFormatException _) {
+                log.warn("Invalid chunkSize parameter format: {}", val);
+            }
+        }
+        return null;
     }
 
     private List<List<Long>> partitionTicketIds(List<Long> list, int size) {

@@ -11,7 +11,10 @@ import java.util.Optional;
  * Exception thrown when a Zendesk API rate limit (HTTP 429) cannot be handled within
  * configured parameters (e.g. fail-fast mode, exceeded action time window, or exhausted retries).
  */
+@SuppressWarnings("java:S110")
 public class ZenithRateLimitException extends HttpClientResponseException {
+
+    private static final long serialVersionUID = 1L;
 
     public enum Reason {
         FAIL_FAST,

@@ -103,7 +103,7 @@ public class ZenithRateLimitFilter extends RateLimitFilter {
             HttpClientResponseException ex
     ) {
         HttpResponse<?> response = ex.getResponse();
-        HttpHeaders headers = response != null ? response.getHeaders() : null;
+        HttpHeaders headers = response.getHeaders();
         long waitSec = resolveWaitDurationSeconds(headers);
         Duration waitDuration = Duration.ofSeconds(waitSec);
         Instant nextAllowableCall = Instant.now().plus(waitDuration);
@@ -209,7 +209,7 @@ public class ZenithRateLimitFilter extends RateLimitFilter {
                     try {
                         double d = Double.parseDouble(value.trim());
                         return (long) Math.ceil(d);
-                    } catch (NumberFormatException __) {
+                    } catch (NumberFormatException _) {
                         // ignore and try next candidate
                     }
                 }
