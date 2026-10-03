@@ -1,5 +1,6 @@
 package lol.pbu.tools;
 
+import io.micronaut.context.annotation.Value;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.util.StringUtils;
 import io.micronaut.http.MediaType;
@@ -84,6 +85,12 @@ public class ZendeskTicketTools {
     private static final String PARAM_REMOVE_TAGS = "removeTags";
     private static final String PARAM_REMOVE_TAGS_SNAKE = "remove_tags";
     private static final String PARAM_TAGS = "tags";
+    private static final String PARAM_CHUNK_SIZE = "chunkSize";
+    private static final String PARAM_CHUNK_SIZE_SNAKE = "chunk_size";
+    private static final String PARAM_BATCH_SIZE = "batchSize";
+    private static final String PARAM_BATCH_SIZE_SNAKE = "batch_size";
+    public static final int MAX_TICKET_CHUNK_SIZE = 100;
+    public static final int DEFAULT_TICKET_CHUNK_SIZE = 100;
     private static final String COULD_NOT_BE_RETRIEVED = " could not be retrieved. Does it exist?";
     private static final String TARGET_PROBLEM_TICKET_PREFIX = "Target problem ticket #";
 
@@ -91,18 +98,34 @@ public class ZendeskTicketTools {
     private final AttachmentClient attachmentClient;
     private final JobStatusClient jobStatusClient;
     private final ZendeskMetadataService metadataService;
+    private final int defaultChunkSize;
 
-    @Inject
     public ZendeskTicketTools(
             TicketClient ticketClient,
             AttachmentClient attachmentClient,
             JobStatusClient jobStatusClient,
             ZendeskMetadataService metadataService
     ) {
+        this(ticketClient, attachmentClient, jobStatusClient, metadataService, DEFAULT_TICKET_CHUNK_SIZE);
+    }
+
+    @Inject
+    public ZendeskTicketTools(
+            TicketClient ticketClient,
+            AttachmentClient attachmentClient,
+            JobStatusClient jobStatusClient,
+            ZendeskMetadataService metadataService,
+            @Value("${micronaut.http.services.zendesk.batch-size:100}") @Nullable Integer defaultChunkSize
+    ) {
         this.ticketClient = ticketClient;
         this.attachmentClient = attachmentClient;
         this.jobStatusClient = jobStatusClient;
         this.metadataService = metadataService;
+        this.defaultChunkSize = resolveConfiguredChunkSize(defaultChunkSize);
+    }
+
+    public int getDefaultChunkSize() {
+        return defaultChunkSize;
     }
 
     public ZendeskMetadataService getMetadataService() {
@@ -114,23 +137,124 @@ public class ZendeskTicketTools {
         return ticketClient.showTicket(ticketId);
     }
 
-    @Tool(description = "Get details of multiple Zendesk tickets by their numeric IDs")
+    @Tool(description = "Get details of multiple Zendesk tickets by their numeric IDs using Zendesk bulk show_many API (GET /api/v2/tickets/show_many.json)")
     public Mono<TicketsResponse> getTickets(
-            @ToolArg(description = "List of numeric ticket IDs to retrieve") List<Long> ticketIds
+            @ToolArg(description = "List of numeric ticket IDs to retrieve") List<Long> ticketIds,
+            @ToolArg(description = "Optional batch chunk size (max 100). Defaults to 100 or ZENDESK_BATCH_SIZE.") @Nullable Integer chunkSize,
+            @Nullable CallToolRequest request
     ) {
-        log.info("MCP Tool called: getTickets(ids={})", ticketIds);
+        log.info("MCP Tool called: getTickets(ids={}, chunkSize={})", ticketIds, chunkSize);
+        validateKnownParameters(request, "getTickets", "ticketIds", PARAM_CHUNK_SIZE, PARAM_CHUNK_SIZE_SNAKE, PARAM_BATCH_SIZE, PARAM_BATCH_SIZE_SNAKE);
         List<Long> distinctIds = parseDistinctTicketIds(ticketIds);
         if (distinctIds.isEmpty()) {
             return Mono.just(new TicketsResponse(Collections.emptyList()));
         }
 
-        return Flux.fromIterable(distinctIds)
-                .flatMapSequential(id -> ticketClient.showTicket(id)
-                        .map(TicketResponse::getTicket)
-                        .onErrorMap(e -> new RuntimeException(String.format("Failed to fetch ticket %d: [%s] %s", id, e.getClass().getSimpleName(), e.getMessage())))
-                        .switchIfEmpty(Mono.error(new RuntimeException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", id)))), 10)
+        int resolvedChunkSize = resolveChunkSize(chunkSize, request);
+        List<List<Long>> chunks = partitionTicketIds(distinctIds, resolvedChunkSize);
+        return Flux.fromIterable(chunks)
+                .concatMap(this::fetchTicketChunk)
                 .collectList()
-                .map(tickets -> new TicketsResponse(tickets != null ? tickets : Collections.emptyList()));
+                .map(allTickets -> validateAndWrapTickets(distinctIds, allTickets));
+    }
+
+    public Mono<TicketsResponse> getTickets(List<Long> ticketIds) {
+        return getTickets(ticketIds, null, null);
+    }
+
+    public Mono<TicketsResponse> getTickets(List<Long> ticketIds, @Nullable Integer chunkSize) {
+        return getTickets(ticketIds, chunkSize, null);
+    }
+
+    private Flux<Ticket> fetchTicketChunk(List<Long> chunk) {
+        Mono<TicketsResponse> multiMono = null;
+        try {
+            multiMono = ticketClient.showMultipleTickets(chunk);
+        } catch (Exception e) {
+            log.debug("showMultipleTickets invocation failed, using fallback: {}", e.getMessage());
+        }
+        if (multiMono != null) {
+            return multiMono
+                    .filter(resp -> resp != null && resp.getTickets() != null)
+                    .flatMapMany(resp -> Flux.fromIterable(resp.getTickets()));
+        }
+        return fetchTicketsIndividually(chunk);
+    }
+
+    private Flux<Ticket> fetchTicketsIndividually(List<Long> distinctIds) {
+        return Flux.fromIterable(distinctIds)
+                .flatMapSequential(id -> {
+                    Mono<TicketResponse> showMono = ticketClient.showTicket(id);
+                    if (showMono == null) {
+                        return Mono.empty();
+                    }
+                    return showMono
+                            .map(TicketResponse::getTicket)
+                            .onErrorMap(e -> new RuntimeException(String.format("Failed to fetch ticket %d: [%s] %s", id, e.getClass().getSimpleName(), e.getMessage())))
+                            .switchIfEmpty(Mono.error(new RuntimeException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", id))));
+                }, 10);
+    }
+
+    private TicketsResponse validateAndWrapTickets(List<Long> distinctIds, List<Ticket> allTickets) {
+        Set<Long> foundIds = allTickets.stream()
+                .filter(t -> t != null && t.getId() != null)
+                .map(Ticket::getId)
+                .collect(Collectors.toSet());
+        List<Long> missingIds = distinctIds.stream()
+                .filter(id -> !foundIds.contains(id))
+                .toList();
+        if (!missingIds.isEmpty()) {
+            if (missingIds.size() == 1) {
+                throw new RuntimeException(String.format("Failed to fetch ticket %d: [EmptyResult] Ticket not found", missingIds.get(0)));
+            }
+            String missingStr = missingIds.stream().map(Object::toString).collect(Collectors.joining(", "));
+            throw new RuntimeException(String.format("Failed to fetch tickets [%s]: [EmptyResult] Tickets not found", missingStr));
+        }
+        return new TicketsResponse(allTickets);
+    }
+
+    private static int resolveConfiguredChunkSize(@Nullable Integer configured) {
+        if (configured == null || configured <= 0) {
+            return DEFAULT_TICKET_CHUNK_SIZE;
+        }
+        return Math.min(configured, MAX_TICKET_CHUNK_SIZE);
+    }
+
+    private int resolveChunkSize(@Nullable Integer chunkSize, @Nullable CallToolRequest request) {
+        Integer requested = chunkSize;
+        if (requested == null && request != null && request.arguments() != null) {
+            Object val = request.arguments().get(PARAM_CHUNK_SIZE);
+            if (val == null) {
+                val = request.arguments().get(PARAM_CHUNK_SIZE_SNAKE);
+            }
+            if (val == null) {
+                val = request.arguments().get(PARAM_BATCH_SIZE);
+            }
+            if (val == null) {
+                val = request.arguments().get(PARAM_BATCH_SIZE_SNAKE);
+            }
+            if (val instanceof Number num) {
+                requested = num.intValue();
+            } else if (val != null) {
+                try {
+                    requested = Integer.parseInt(val.toString().trim());
+                } catch (NumberFormatException _) {
+                    log.warn("Invalid chunkSize parameter format: {}", val);
+                }
+            }
+        }
+        if (requested != null && requested > 0) {
+            return Math.min(requested, MAX_TICKET_CHUNK_SIZE);
+        }
+        return this.defaultChunkSize;
+    }
+
+    private List<List<Long>> partitionTicketIds(List<Long> list, int size) {
+        List<List<Long>> chunks = new ArrayList<>();
+        for (int i = 0; i < list.size(); i += size) {
+            chunks.add(list.subList(i, Math.min(list.size(), i + size)));
+        }
+        return chunks;
     }
 
     private List<Long> parseDistinctTicketIds(@Nullable List<?> rawIds) {
@@ -1102,7 +1226,7 @@ public class ZendeskTicketTools {
     }
 
 
-    @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, attachments, tags, custom status, ticket form, or link to a problem ticket. Supports concurrent immediate updates or Zendesk async bulk jobs.")
+    @Tool(description = "Batch update multiple Zendesk tickets by their numeric IDs with a comment, status, priority, attachments, tags, custom status, ticket form, or link to a problem ticket. Queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus by default, or performs concurrent immediate updates if asyncBulk is false. For async jobs, use getJobStatus(jobId) to track progress until completed.")
     public Mono<BatchUpdateResponse> batchUpdateTickets(
             @ToolArg(description = "List of numeric ticket IDs to update") List<Long> ticketIds,
             @ToolArg(description = "Comment text to add to the tickets") @Nullable String comment,
@@ -1111,7 +1235,7 @@ public class ZendeskTicketTools {
             @ToolArg(description = "Required if a comment or attachment is provided. Whether the comment is public (true) or private internal note (false)") @Nullable Boolean isPublic,
             @ToolArg(description = "Optional upload tokens obtained from uploadAttachment") @Nullable List<String> uploadTokens,
             @ToolArg(description = "Optional local file paths to upload and attach automatically") @Nullable List<String> attachmentFilePaths,
-            @ToolArg(description = "If true, queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus. If false (default), updates tickets concurrently via Reactor returning immediate per-ticket results.") @Nullable Boolean asyncBulk,
+            @ToolArg(description = "If true (default), queues an async bulk job in Zendesk (PUT /api/v2/tickets/update_many) returning JobStatus. If false, updates tickets concurrently via Reactor returning immediate per-ticket results.") @Nullable Boolean asyncBulk,
             @ToolArg(description = "Optional ID of the parent problem ticket to link these incidents to") @Nullable Long problemId,
             @ToolArg(description = "Required if setting problemId on tickets that are not currently incidents. Set to true to explicitly convert them.") @Nullable Boolean convertToIncident,
             @ToolArg(description = "Optional custom fields as a list of objects containing 'id' and 'value', e.g. [{'id': 1234, 'value': 'foo'}]") @Nullable List<Map<String, Object>> customFields,
@@ -1122,6 +1246,7 @@ public class ZendeskTicketTools {
             @ToolArg(description = "Optional tags to add to the tickets without removing existing ones") @Nullable List<String> additionalTags,
             @ToolArg(description = "Optional tags to remove from the tickets") @Nullable List<String> removeTags,
             @ToolArg(description = "Optional tags to set on the tickets. WARNING: Destructive — replaces all existing tags on the tickets with this set.") @Nullable List<String> tags,
+            @ToolArg(description = "Optional batch chunk size (max 100). Defaults to 100 or ZENDESK_BATCH_SIZE.") @Nullable Integer chunkSize,
             CallToolRequest request
     ) {
         TicketMutationOptions options = TicketMutationOptions.builder()
@@ -1142,7 +1267,31 @@ public class ZendeskTicketTools {
                 .removeTags(removeTags)
                 .tags(tags)
                 .build();
-        return batchUpdateTickets(ticketIds, options, asyncBulk, request);
+        return batchUpdateTickets(ticketIds, options, asyncBulk, chunkSize, request);
+    }
+
+    public Mono<BatchUpdateResponse> batchUpdateTickets(
+            List<Long> ticketIds,
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Boolean asyncBulk,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
+            @Nullable List<String> additionalTags,
+            @Nullable List<String> removeTags,
+            @Nullable List<String> tags,
+            CallToolRequest request
+    ) {
+        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, additionalTags, removeTags, tags, null, request);
     }
 
     public Mono<BatchUpdateResponse> batchUpdateTickets(
@@ -1163,7 +1312,7 @@ public class ZendeskTicketTools {
             @Nullable Long ticketFormId,
             CallToolRequest request
     ) {
-        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, null, null, null, request);
+        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, null, null, null, null, request);
     }
 
     public Mono<BatchUpdateResponse> batchUpdateTickets(
@@ -1172,14 +1321,25 @@ public class ZendeskTicketTools {
             @Nullable Boolean asyncBulk,
             @Nullable CallToolRequest request
     ) {
+        return batchUpdateTickets(ticketIds, options, asyncBulk, null, request);
+    }
+
+    public Mono<BatchUpdateResponse> batchUpdateTickets(
+            List<Long> ticketIds,
+            TicketMutationOptions options,
+            @Nullable Boolean asyncBulk,
+            @Nullable Integer chunkSize,
+            @Nullable CallToolRequest request
+    ) {
         TicketMutationOptions opt = options != null ? options : TicketMutationOptions.builder().build();
-        log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={})", ticketIds, asyncBulk);
-        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, "asyncBulk", PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS);
+        log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={}, chunkSize={})", ticketIds, asyncBulk, chunkSize);
+        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, "asyncBulk", PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_CHUNK_SIZE, PARAM_CHUNK_SIZE_SNAKE, PARAM_BATCH_SIZE, PARAM_BATCH_SIZE_SNAKE);
         List<Long> distinctIds = parseDistinctTicketIds(ticketIds);
         if (distinctIds.isEmpty()) {
             return Mono.just(new BatchUpdateResponse(null, null, Collections.emptyList()));
         }
 
+        int resolvedChunkSize = resolveChunkSize(chunkSize, request);
         validateProblemTypeConflict(opt.problemId(), opt.type());
 
         final List<String> resolvedAdditionalTags = ToolValidationSupport.resolveAndValidateTags(opt.additionalTags(), PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, request);
@@ -1203,8 +1363,8 @@ public class ZendeskTicketTools {
         return validateProblemTarget(resolvedOpt.problemId())
                 .then(resolveUploadTokens(resolvedOpt.uploadTokens(), resolvedOpt.attachmentFilePaths()))
                 .flatMap(tokens -> {
-                    if (Boolean.TRUE.equals(asyncBulk)) {
-                        return executeAsyncBulkBatchUpdate(distinctIds, resolvedOpt, tokens, parsedCustomFields, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset);
+                    if (!Boolean.FALSE.equals(asyncBulk)) {
+                        return executeAsyncBulkBatchUpdate(distinctIds, resolvedChunkSize, resolvedOpt, tokens, parsedCustomFields, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset);
                     }
                     return executeConcurrentBatchUpdate(distinctIds, resolvedOpt, tokens, parsedCustomFields, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset);
                 });
@@ -1212,6 +1372,7 @@ public class ZendeskTicketTools {
 
     private Mono<BatchUpdateResponse> executeAsyncBulkBatchUpdate(
             List<Long> distinctIds,
+            int chunkSize,
             TicketMutationOptions options,
             List<String> tokens,
             List<TicketCustomField> parsedCustomFields,
@@ -1221,20 +1382,21 @@ public class ZendeskTicketTools {
             @Nullable TicketUpdateInputType parsedType,
             boolean isTypeUnset
     ) {
-        return validateCurrentTicketsForBulkAsync(distinctIds, options, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset)
+        return validateCurrentTicketsForBulkAsync(distinctIds, chunkSize, options, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset)
                 .then(Mono.defer(() -> {
                     TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId, options.additionalTags(), options.removeTags(), options.tags());
                     if (options.problemId() != null) {
                         input.setProblemId(options.problemId());
                         input.setType(TicketUpdateInputType.INCIDENT);
                     }
-                    return sendBulkUpdateChunks(distinctIds, input)
+                    return sendBulkUpdateChunks(distinctIds, input, chunkSize)
                             .map(jobStatuses -> new BatchUpdateResponse(jobStatuses.size() == 1 ? jobStatuses.get(0) : null, jobStatuses.isEmpty() ? null : jobStatuses, null));
                 }));
     }
 
     private Mono<Void> validateCurrentTicketsForBulkAsync(
             List<Long> distinctIds,
+            int chunkSize,
             TicketMutationOptions options,
             @Nullable Long resolvedCustomStatusId,
             @Nullable Long resolvedTicketFormId,
@@ -1245,7 +1407,33 @@ public class ZendeskTicketTools {
         if (!needsCurrentTicket(options, resolvedCustomStatusId, isTypeUnset, parsedType)) {
             return Mono.empty();
         }
-        return Flux.fromIterable(distinctIds)
+        List<List<Long>> chunks = partitionTicketIds(distinctIds, chunkSize);
+        return Flux.fromIterable(chunks)
+                .concatMap(this::fetchTicketsForValidation)
+                .doOnNext(currentTicket -> {
+                    TicketUpdateInput testInput = new TicketUpdateInput();
+                    validateTicketState(currentTicket.getId(), currentTicket, options, testInput, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus);
+                })
+                .then();
+    }
+
+    private Flux<Ticket> fetchTicketsForValidation(List<Long> chunk) {
+        Mono<TicketsResponse> multiMono = null;
+        try {
+            multiMono = ticketClient.showMultipleTickets(chunk);
+        } catch (Exception e) {
+            log.debug("showMultipleTickets invocation failed for validation: {}", e.getMessage());
+        }
+        if (multiMono != null) {
+            return multiMono
+                    .filter(resp -> resp != null && resp.getTickets() != null)
+                    .flatMapMany(resp -> Flux.fromIterable(resp.getTickets()));
+        }
+        return fallbackFetchTicketsForValidation(chunk);
+    }
+
+    private Flux<Ticket> fallbackFetchTicketsForValidation(List<Long> chunk) {
+        return Flux.fromIterable(chunk)
                 .flatMap(id -> {
                     Mono<TicketResponse> showMono = ticketClient.showTicket(id);
                     if (showMono == null) {
@@ -1254,23 +1442,19 @@ public class ZendeskTicketTools {
                     return showMono.onErrorResume(e -> Mono.empty())
                             .filter(resp -> resp != null && resp.getTicket() != null)
                             .map(TicketResponse::getTicket);
-                })
-                .doOnNext(currentTicket -> {
-                    TicketUpdateInput testInput = new TicketUpdateInput();
-                    validateTicketState(currentTicket.getId(), currentTicket, options, testInput, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus);
-                })
-                .then();
+                });
     }
 
-    private Mono<List<JobStatus>> sendBulkUpdateChunks(List<Long> distinctIds, TicketUpdateInput input) {
-        List<List<Long>> chunks = new ArrayList<>();
-        for (int i = 0; i < distinctIds.size(); i += 100) {
-            chunks.add(distinctIds.subList(i, Math.min(distinctIds.size(), i + 100)));
-        }
+    private Mono<List<JobStatus>> sendBulkUpdateChunks(List<Long> distinctIds, TicketUpdateInput input, int chunkSize) {
+        List<List<Long>> chunks = partitionTicketIds(distinctIds, chunkSize);
         return Flux.fromIterable(chunks)
                 .concatMap(chunk -> {
                     String idsStr = chunk.stream().map(Object::toString).collect(Collectors.joining(","));
-                    return ticketClient.updateManyTickets(idsStr, new TicketUpdateRequest(input))
+                    Mono<JobStatusResponse> respMono = ticketClient.updateManyTickets(idsStr, new TicketUpdateRequest(input));
+                    if (respMono == null) {
+                        return Mono.<JobStatus>empty();
+                    }
+                    return respMono
                             .filter(jobResponse -> jobResponse != null && jobResponse.getJobStatus() != null)
                             .map(JobStatusResponse::getJobStatus);
                 })

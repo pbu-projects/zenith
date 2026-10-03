@@ -17,3 +17,4 @@ micronaut:
           client-secret: ${ZENDESK_CLIENT_SECRET:}
           token: ${ZENDESK_OAUTH_TOKEN:}
           scope: ${ZENDESK_OAUTH_SCOPE:`read write`}
+        batch-size: ${ZENDESK_BATCH_SIZE:100}
