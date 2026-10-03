@@ -47,6 +47,8 @@ import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
+import lol.pbu.ratelimit.ZenithRateLimitBudget;
+import lol.pbu.ratelimit.ZenithRateLimitConfiguration;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -209,25 +211,36 @@ public class ZenithMcpAsyncServerFactory {
             }
             CallToolRequest safeRequest = request != null ? request : new CallToolRequest("", Map.of());
 
-            Map<Argument<?>, Object> boundVariables = prepareBoundVariables(method.getArguments(), candidates);
-            DefaultExecutableBinder<CallToolRequest> binder = new DefaultExecutableBinder<>(boundVariables);
-            BoundExecutable<B, ?> bound = binder.bind(method, argumentBinderRegistry, safeRequest);
-            Object rawResult = bound.invoke(bean);
+            ZenithRateLimitConfiguration rateLimitConfig = beanContext.containsBean(ZenithRateLimitConfiguration.class)
+                    ? beanContext.getBean(ZenithRateLimitConfiguration.class)
+                    : null;
+            ZenithRateLimitBudget budget = ZenithRateLimitBudget.create(rateLimitConfig, safeRequest.arguments());
+            ZenithRateLimitBudget.setCurrentBudget(budget);
+            try {
+                Map<Argument<?>, Object> boundVariables = prepareBoundVariables(method.getArguments(), candidates);
+                DefaultExecutableBinder<CallToolRequest> binder = new DefaultExecutableBinder<>(boundVariables);
+                BoundExecutable<B, ?> bound = binder.bind(method, argumentBinderRegistry, safeRequest);
+                Object rawResult = bound.invoke(bean);
 
-            return switch (rawResult) {
-                case Publisher<?> publisher -> Mono.from(publisher)
-                        .map(payload -> serializeResult(payload, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader))
-                        .defaultIfEmpty(CallToolResult.builder().isError(false).build())
-                        .onErrorResume(error -> Mono.error(mapException(error, exceptionMappers)));
-                case CompletableFuture<?> cf -> Mono.fromFuture(cf)
-                        .map(payload -> serializeResult(payload, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader))
-                        .defaultIfEmpty(CallToolResult.builder().isError(false).build())
-                        .onErrorResume(error -> Mono.error(mapException(error, exceptionMappers)));
-                case null, default -> {
-                    CallToolResult result = serializeResult(rawResult, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader);
-                    yield Mono.just(result);
-                }
-            };
+                return switch (rawResult) {
+                    case Publisher<?> publisher -> Mono.from(publisher)
+                            .map(payload -> serializeResult(payload, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader))
+                            .defaultIfEmpty(CallToolResult.builder().isError(false).build())
+                            .onErrorResume(error -> Mono.error(mapException(error, exceptionMappers)))
+                            .contextWrite(ctx -> ctx.put(ZenithRateLimitBudget.KEY, budget));
+                    case CompletableFuture<?> cf -> Mono.fromFuture(cf)
+                            .map(payload -> serializeResult(payload, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader))
+                            .defaultIfEmpty(CallToolResult.builder().isError(false).build())
+                            .onErrorResume(error -> Mono.error(mapException(error, exceptionMappers)))
+                            .contextWrite(ctx -> ctx.put(ZenithRateLimitBudget.KEY, budget));
+                    case null, default -> {
+                        CallToolResult result = serializeResult(rawResult, method.getReturnType().asArgument(), jsonMapper, jsonSchemaClassPathResourceLoader);
+                        yield Mono.just(result).contextWrite(ctx -> ctx.put(ZenithRateLimitBudget.KEY, budget));
+                    }
+                };
+            } finally {
+                ZenithRateLimitBudget.clearCurrentBudget();
+            }
         } catch (Exception ex) {
             return Mono.error(mapException(ex, exceptionMappers));
         }

@@ -2395,8 +2395,8 @@ class ZendeskToolsValidationSpec extends Specification {
                 .ticketFormId(1001L)
                 .build()
 
-        when: "calling batchUpdateTickets with options"
-        def response = tools.batchUpdateTickets([101L, 102L], options)
+        when: "calling batchUpdateTickets with options in concurrent mode"
+        def response = tools.batchUpdateTickets([101L, 102L], options, false, null)
 
         then:
         response != null
@@ -2410,6 +2410,15 @@ class ZendeskToolsValidationSpec extends Specification {
             req.ticket.comment.body == "Batch update via options builder" &&
             req.ticket.comment.isPublic == false
         }
+
+        when: "calling batchUpdateTickets with options defaulting to async bulk"
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-options-bulk" }))
+        def defaultResponse = tools.batchUpdateTickets([101L, 102L], options)
+
+        then:
+        defaultResponse != null
+        defaultResponse.jobStatus != null
+        defaultResponse.jobStatus.id == "job-options-bulk"
     }
 
     def "getMetadataService returns initialized metadataService"() {
@@ -2488,11 +2497,19 @@ class ZendeskToolsValidationSpec extends Specification {
         resp1 != null
         resp1.ticket.id == 12345L
 
-        when: "batchUpdateTickets with null options"
-        def resp2 = tools.batchUpdateTickets([101L], (TicketMutationOptions) null)
+        when: "batchUpdateTickets with null options in concurrent mode"
+        def resp2 = tools.batchUpdateTickets([101L], (TicketMutationOptions) null, false, null)
         then:
         resp2 != null
         resp2.results.size() == 1
+
+        when: "batchUpdateTickets with null options defaulting to async bulk"
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-null-bulk" }))
+        def respDefault = tools.batchUpdateTickets([101L], (TicketMutationOptions) null)
+        then:
+        respDefault != null
+        respDefault.jobStatus != null
+        respDefault.jobStatus.id == "job-null-bulk"
     }
 
     def "updateTicket positional overload delegates cleanly"() {
@@ -3782,6 +3799,194 @@ class ZendeskToolsValidationSpec extends Specification {
         modified.removeTags() == ["orig_rem"]
         modified.tags() == ["orig_tag"]
         modified.comment() == "Original"
+    }
+
+    def "getTickets partitions queries according to chunkSize parameter and merges results"() {
+        given:
+        def ids1 = [101L, 102L]
+        def ids2 = [103L]
+        ticketClient.showMultipleTickets(ids1) >> Mono.just(new TicketsResponse([
+                new Ticket().tap { id = 101L; subject = "Ticket 101" },
+                new Ticket().tap { id = 102L; subject = "Ticket 102" }
+        ]))
+        ticketClient.showMultipleTickets(ids2) >> Mono.just(new TicketsResponse([
+                new Ticket().tap { id = 103L; subject = "Ticket 103" }
+        ]))
+
+        when: "calling getTickets with explicit chunkSize=2"
+        def resp = tools.getTickets([101L, 102L, 103L], 2)
+
+        then:
+        resp != null
+        resp.tickets.size() == 3
+        resp.tickets*.id == [101L, 102L, 103L]
+    }
+
+    def "getTickets aggregates missing ticket IDs when multiple tickets are not found"() {
+        given:
+        ticketClient.showMultipleTickets([101L, 102L, 103L]) >> Mono.just(new TicketsResponse([
+                new Ticket().tap { id = 101L; subject = "Ticket 101" }
+        ]))
+
+        when: "fetching tickets where multiple are missing"
+        tools.getTickets([101L, 102L, 103L])
+
+        then:
+        def e = thrown(RuntimeException)
+        e.message == "Failed to fetch tickets [102, 103]: [EmptyResult] Tickets not found"
+    }
+
+    def "batchUpdateTickets partitions update_many requests according to chunkSize"() {
+        given:
+        def recordedIds = []
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            recordedIds << ids
+            return Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-" + ids }))
+        }
+
+        when: "batch updating 3 tickets with chunkSize 2"
+        def options = TicketMutationOptions.builder().comment("Chunk test").isPublic(false).build()
+        def resp = tools.batchUpdateTickets([101L, 102L, 103L], options, true, 2, null)
+
+        then:
+        recordedIds == ["101,102", "103"]
+        resp != null
+        resp.jobStatuses != null
+        resp.jobStatuses.size() == 2
+        resp.jobStatuses*.id == ["job-101,102", "job-103"]
+        resp.jobStatus == null
+    }
+
+    def "ZendeskTicketTools chunk size respects caps and defaults"() {
+        given:
+        def customTools = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService, 50)
+
+        expect:
+        customTools.defaultChunkSize == 50
+
+        when: "defaultChunkSize constructor with null or negative defaults to 100"
+        def defaultTools1 = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService, null)
+        def defaultTools2 = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService, -10)
+        def defaultTools3 = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService, 200)
+
+        then:
+        defaultTools1.defaultChunkSize == 100
+        defaultTools2.defaultChunkSize == 100
+        defaultTools3.defaultChunkSize == 100
+    }
+
+    def "getTickets uses configured batch size when chunkSize tool parameter is omitted"() {
+        given: "a tools instance configured with defaultChunkSize=2"
+        def configuredTools = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService, 2)
+        def ids1 = [101L, 102L]
+        def ids2 = [103L]
+        ticketClient.showMultipleTickets(ids1) >> Mono.just(new TicketsResponse([
+                new Ticket().tap { id = 101L; subject = "Ticket 101" },
+                new Ticket().tap { id = 102L; subject = "Ticket 102" }
+        ]))
+        ticketClient.showMultipleTickets(ids2) >> Mono.just(new TicketsResponse([
+                new Ticket().tap { id = 103L; subject = "Ticket 103" }
+        ]))
+
+        when: "calling getTickets with 3 IDs without chunkSize parameter"
+        def resp = configuredTools.getTickets([101L, 102L, 103L]).block()
+
+        then:
+        resp != null
+        resp.tickets.size() == 3
+        resp.tickets*.id == [101L, 102L, 103L]
+    }
+
+    def "batchUpdateTickets uses configured batch size when chunkSize tool parameter is omitted"() {
+        given: "a tools instance configured with defaultChunkSize=2"
+        def configuredTools = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService, 2)
+        def recordedIds = []
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            recordedIds << ids
+            return Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-" + ids }))
+        }
+
+        when: "batch updating 3 tickets without chunkSize"
+        def options = TicketMutationOptions.builder().comment("Configured chunk test").isPublic(false).build()
+        def resp = configuredTools.batchUpdateTickets([101L, 102L, 103L], options).block()
+
+        then:
+        recordedIds == ["101,102", "103"]
+        resp != null
+        resp.jobStatuses != null
+        resp.jobStatuses.size() == 2
+        resp.jobStatuses*.id == ["job-101,102", "job-103"]
+    }
+
+    def "tool parameter chunkSize supersedes configured default batch size"() {
+        given: "a tools instance configured with defaultChunkSize=2"
+        def configuredTools = new ZendeskTicketTools(ticketClient, attachmentClient, jobStatusClient, metadataService, 2)
+        def recordedIds = []
+        ticketClient.updateManyTickets(_ as String, _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            recordedIds << ids
+            return Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-" + ids }))
+        }
+
+        when: "batch updating with explicit tool parameter chunkSize=1 overriding defaultChunkSize=2"
+        def options = TicketMutationOptions.builder().comment("Override test").isPublic(false).build()
+        def resp = configuredTools.batchUpdateTickets([101L, 102L, 103L], options, true, 1, null).block()
+
+        then:
+        recordedIds == ["101", "102", "103"]
+        resp != null
+        resp.jobStatuses.size() == 3
+    }
+
+    def "getTickets and batchUpdateTickets accept chunkSize and chunk_size in CallToolRequest"() {
+        given:
+        ticketClient.showMultipleTickets([101L]) >> Mono.just(new TicketsResponse([
+                new Ticket().tap { id = 101L }
+        ]))
+        ticketClient.updateManyTickets("101", _ as TicketUpdateRequest) >> Mono.just(new JobStatusResponse(
+                new JobStatus().tap { id = "job-snake-chunk" }
+        ))
+
+        when: "getTickets with snake_case chunk_size in CallToolRequest"
+        def reqGet = new CallToolRequest("getTickets", [ticketIds: [101L], chunk_size: 1])
+        def getResp = tools.getTickets([101L], null, reqGet)
+
+        then:
+        getResp != null
+        getResp.tickets.size() == 1
+
+        when: "batchUpdateTickets with snake_case chunk_size in CallToolRequest"
+        def reqUpdate = new CallToolRequest("batchUpdateTickets", [ticketIds: [101L], comment: "Hello", isPublic: false, chunk_size: 1])
+        def updateResp = tools.batchUpdateTickets([101L], "Hello", null, null, false, null, null, true, null, false, null, null, null, null, null, null, null, null, null, reqUpdate)
+
+        then:
+        updateResp != null
+        updateResp.jobStatus != null
+        updateResp.jobStatus.id == "job-snake-chunk"
+
+        when: "getTickets with snake_case batch_size in CallToolRequest"
+        def reqGetBatch = new CallToolRequest("getTickets", [ticketIds: [101L], batch_size: 1])
+        def getRespBatch = tools.getTickets([101L], null, reqGetBatch)
+
+        then:
+        getRespBatch != null
+        getRespBatch.tickets.size() == 1
+
+        when: "batchUpdateTickets with camelCase batchSize in CallToolRequest"
+        def reqUpdateBatch = new CallToolRequest("batchUpdateTickets", [ticketIds: [101L], comment: "Hello", isPublic: false, batchSize: 1])
+        def updateRespBatch = tools.batchUpdateTickets([101L], "Hello", null, null, false, null, null, true, null, false, null, null, null, null, null, null, null, null, null, reqUpdateBatch)
+
+        then:
+        updateRespBatch != null
+        updateRespBatch.jobStatus != null
+        updateRespBatch.jobStatus.id == "job-snake-chunk"
+
+        when: "calling with unknown parameter throws IllegalArgumentException"
+        def badReq = new CallToolRequest("getTickets", [ticketIds: [101L], unknownField: "bad"])
+        tools.getTickets([101L], null, badReq)
+
+        then:
+        def ex = thrown(IllegalArgumentException)
+        ex.message.contains("Unrecognized parameter: 'unknownField'")
     }
 }
 

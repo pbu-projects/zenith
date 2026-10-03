@@ -7,6 +7,9 @@ import io.micronaut.http.client.exceptions.HttpClientResponseException
 import io.micronaut.json.tree.JsonNode
 import io.micronaut.serde.ObjectMapper
 import java.nio.charset.StandardCharsets
+import java.time.Duration
+import java.time.Instant
+import lol.pbu.ratelimit.ZenithRateLimitException
 import spock.lang.Specification
 
 class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
@@ -572,6 +575,54 @@ class HttpClientResponseExceptionMcpErrorMapperSpec extends Specification {
         then:
         mcpError.jsonRpcError.code == -32603
         mcpError.message.contains("Plain text upstream error")
+    }
+
+    def "maps ZenithRateLimitException in fail-fast mode with next allowable call timestamp"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", "30")
+        def nextCall = Instant.now().plusSeconds(30)
+        def ex = new ZenithRateLimitException(
+                "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Rate limit mode is configured to 'fail-fast'. You must wait 30 seconds before sending further requests. Next allowable call at: ${nextCall}.",
+                response,
+                ZenithRateLimitException.Reason.FAIL_FAST,
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(60),
+                Duration.ZERO,
+                nextCall
+        )
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32029
+        mcpError.message.contains("fail-fast")
+        mcpError.message.contains("30 seconds")
+        mcpError.message.contains("Next allowable call at:")
+    }
+
+    def "maps ZenithRateLimitException in retry mode when window is exceeded"() {
+        given:
+        def response = HttpResponse.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", "90")
+        def nextCall = Instant.now().plusSeconds(90)
+        def ex = new ZenithRateLimitException(
+                "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Action timed out after rate limit wait exceeded maximum window of 60 seconds. You must wait 90 seconds before sending further requests. Next allowable call at: ${nextCall}.",
+                response,
+                ZenithRateLimitException.Reason.WINDOW_EXCEEDED,
+                Duration.ofSeconds(90),
+                Duration.ofSeconds(60),
+                Duration.ZERO,
+                nextCall
+        )
+
+        when:
+        def mcpError = mapper.map(ex)
+
+        then:
+        mcpError.jsonRpcError.code == -32029
+        mcpError.message.contains("exceeded maximum window of 60 seconds")
+        mcpError.message.contains("90 seconds")
+        mcpError.message.contains("Next allowable call at:")
     }
 }
 
