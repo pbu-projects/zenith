@@ -234,4 +234,54 @@ class ZenithRateLimitFilterSpec extends Specification {
         snapshot.endpointLimits.get("incremental-tickets").total == 10
         snapshot.endpointLimits.get("incremental-tickets").resets == 60
     }
+
+    def "when env var is immediate but tool arg provides window, filter retries within window rather than failing immediately"() {
+        given:
+        def tracker = new RateLimitTracker()
+        def z4jConfig = new RateLimitConfiguration()
+        z4jConfig.setAutoWaitEnabled(false)
+        def zenithConfig = new ZenithRateLimitConfiguration()
+        zenithConfig.setMode("immediate") // env var is immediate
+        zenithConfig.setMaxWindowSeconds(60)
+
+        def filter = new ZenithRateLimitFilter(tracker, z4jConfig, zenithConfig)
+
+        def request = Mock(MutableHttpRequest)
+        request.getPath() >> "/api/v2/tickets"
+        request.getMethodName() >> "GET"
+        request.getUri() >> URI.create("https://example.zendesk.com/api/v2/tickets")
+
+        def response429 = HttpResponse.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", "1")
+        def ex429 = new HttpClientResponseException("Too Many Requests", response429)
+        def responseOk = HttpResponse.ok("success")
+
+        def chain = Mock(ClientFilterChain)
+        def attempts = 0
+        chain.proceed(request) >> {
+            attempts++
+            if (attempts == 1) {
+                return Flux.error(ex429)
+            } else {
+                return Flux.just(responseOk)
+            }
+        }
+
+        // Tool call passed rateLimitWindow = 30
+        def budget = ZenithRateLimitBudget.create(zenithConfig, ["rateLimitWindow": 30])
+
+        when:
+        def start = System.currentTimeMillis()
+        def result = Mono.from(filter.doFilter(request, chain))
+                .contextWrite({ ctx -> ctx.put(ZenithRateLimitBudget.KEY, budget) })
+                .block()
+        def duration = System.currentTimeMillis() - start
+
+        then:
+        result.status == HttpStatus.OK
+        attempts == 2
+        duration >= 900
+        budget.warning.isPresent()
+        budget.warning.get().contains("Overriding mode to 'retry' bounded by 30s")
+    }
 }
