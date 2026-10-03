@@ -912,47 +912,51 @@ public class ZendeskTicketTools {
         return lower.startsWith("id_") && (lower.endsWith(".pub") || !lower.contains("."));
     }
 
-    static boolean isSensitiveSystemPath(Path path) {
-        if (path == null) {
+    static boolean hasSensitiveRootOrSystemPrefix(Path normalized) {
+        if (normalized.getNameCount() == 0) {
             return false;
         }
-        Path normalized = path.toAbsolutePath().normalize();
-
-        // Check root-level directory or /private/etc, /var/run, /private/var/run (runtime secrets)
-        if (normalized.getNameCount() > 0) {
-            String firstElement = normalized.getName(0).toString().toLowerCase();
-            if (SENSITIVE_ROOT_DIRS.contains(firstElement)) {
+        String firstElement = normalized.getName(0).toString().toLowerCase();
+        if (SENSITIVE_ROOT_DIRS.contains(firstElement)) {
+            return true;
+        }
+        if (normalized.getNameCount() > 1) {
+            if ("var".equalsIgnoreCase(firstElement) && "run".equalsIgnoreCase(normalized.getName(1).toString())) {
                 return true;
             }
-            if (normalized.getNameCount() > 1 && "private".equals(firstElement)) {
+            if ("private".equalsIgnoreCase(firstElement)) {
                 String secondElement = normalized.getName(1).toString().toLowerCase();
                 if (SENSITIVE_ROOT_DIRS.contains(secondElement)) {
                     return true;
                 }
-                if (normalized.getNameCount() > 2 && "var".equals(secondElement) && "run".equals(normalized.getName(2).toString().toLowerCase())) {
-                    return true;
-                }
-            }
-            if (normalized.getNameCount() > 1 && "var".equals(firstElement) && "run".equals(normalized.getName(1).toString().toLowerCase())) {
-                return true;
+                return normalized.getNameCount() > 2
+                        && "var".equalsIgnoreCase(secondElement)
+                        && "run".equalsIgnoreCase(normalized.getName(2).toString());
             }
         }
+        return false;
+    }
 
-        // Check path elements for sensitive directory names
+    static boolean hasSensitiveDirectory(Path normalized) {
         for (int i = 0; i < normalized.getNameCount(); i++) {
             String element = normalized.getName(i).toString().toLowerCase();
             if (SENSITIVE_DIR_NAMES.contains(element)) {
                 return true;
             }
         }
+        return false;
+    }
 
-        // Check the filename itself
-        Path fileName = normalized.getFileName();
-        if (fileName != null && isSensitiveFilename(fileName.toString())) {
+    static boolean isSensitiveSystemPath(Path path) {
+        if (path == null) {
+            return false;
+        }
+        Path normalized = path.toAbsolutePath().normalize();
+        if (hasSensitiveRootOrSystemPrefix(normalized) || hasSensitiveDirectory(normalized)) {
             return true;
         }
-
-        return false;
+        Path fileName = normalized.getFileName();
+        return fileName != null && isSensitiveFilename(fileName.toString());
     }
 
     static final Map<String, String> EXTENSION_MIME_TYPES = Map.ofEntries(
