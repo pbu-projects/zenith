@@ -1,5 +1,8 @@
 package lol.pbu.mcp;
 
+import io.micronaut.http.HttpResponse;
+import io.micronaut.http.HttpStatus;
+import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
 import jakarta.inject.Singleton;
@@ -29,5 +32,12 @@ public class SampleReactiveToolBean {
     @Tool(name = "test_future", description = "Returns CompletableFuture")
     public CompletableFuture<String> testFuture(@ToolArg(description = "Name") String name) {
         return CompletableFuture.completedFuture("Hello " + name);
+    }
+
+    @Tool(name = "test_rate_limit", description = "Fails with HTTP 429")
+    public Mono<String> testRateLimit() {
+        HttpResponse<?> response = HttpResponse.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", "30");
+        return Mono.error(new HttpClientResponseException("Too Many Requests", response));
     }
 }

@@ -14,12 +14,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+import lol.pbu.ratelimit.ZenithRateLimitException;
 
 
 /**
@@ -56,7 +58,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
 
         // Explicit handling for HTTP 429 (Too Many Requests / Rate Limited)
         if (statusCode == 429) {
-            return handleRateLimit(response);
+            return handleRateLimit(e, response);
         }
 
         String diagnosis = extractZendeskErrorMessage(response);
@@ -103,9 +105,14 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
         };
     }
 
-    private McpError handleRateLimit(HttpResponse<?> response) {
-        String waitTime = resolveWaitTime(response);
-        String rateLimitMsg = formatRateLimitMessage(waitTime);
+    private McpError handleRateLimit(HttpClientResponseException e, HttpResponse<?> response) {
+        String rateLimitMsg;
+        if (e instanceof ZenithRateLimitException zEx) {
+            rateLimitMsg = zEx.getMessage();
+        } else {
+            String waitTime = resolveWaitTime(response);
+            rateLimitMsg = formatRateLimitMessage(waitTime);
+        }
         log.warn("Mapping HTTP 429 Rate Limit to MCP error: {}", rateLimitMsg);
 
         // Use -32029 (within JSON-RPC reserved server-error range -32000 to -32099)
@@ -132,10 +139,19 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             return "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Please pause before retrying.";
         }
         boolean isNumeric = waitTime.chars().allMatch(Character::isDigit);
-        String template = isNumeric
-                ? "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. You must wait %s seconds before sending further requests."
-                : "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Retry after: %s.";
-        return String.format(template, waitTime);
+        if (isNumeric) {
+            try {
+                long seconds = Long.parseLong(waitTime);
+                String nextCall = Instant.now().plusSeconds(seconds).toString();
+                return String.format(
+                        "Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. You must wait %s seconds before sending further requests. Next allowable call at: %s.",
+                        waitTime, nextCall
+                );
+            } catch (Exception _) {
+                // fallback to template below
+            }
+        }
+        return String.format("Zendesk API rate limit exceeded (HTTP 429 Too Many Requests). Automatic retries exhausted. Retry after: %s.", waitTime);
     }
 
     private String extractZendeskErrorMessage(HttpResponse<?> response) {

@@ -18,3 +18,8 @@ micronaut:
           token: ${ZENDESK_OAUTH_TOKEN:}
           scope: ${ZENDESK_OAUTH_SCOPE:`read write`}
         batch-size: ${ZENDESK_BATCH_SIZE:100}
+zenith:
+  rate-limit:
+    mode: ${ZENDESK_RATE_LIMIT_MODE:retry}
+    max-window-seconds: ${ZENDESK_RATE_LIMIT_WINDOW:60}
+

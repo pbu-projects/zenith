@@ -37,12 +37,14 @@ class ReactiveToolExecutionSpec extends Specification {
         def errorEntry = registry.find("test_error")
         def emptyEntry = registry.find("test_empty")
         def futureEntry = registry.find("test_future")
+        def rateLimitEntry = registry.find("test_rate_limit")
 
         then: "all tool methods are indexed"
         echoEntry != null
         errorEntry != null
         emptyEntry != null
         futureEntry != null
+        rateLimitEntry != null
 
         when: "listing tools via McpAsyncServer public API"
         List<Tool> serverTools = server.listTools().collectList().block()
@@ -50,12 +52,14 @@ class ReactiveToolExecutionSpec extends Specification {
         def errorTool = serverTools.find { it.name() == "test_error" }
         def emptyTool = serverTools.find { it.name() == "test_empty" }
         def futureTool = serverTools.find { it.name() == "test_future" }
+        def rateLimitTool = serverTools.find { it.name() == "test_rate_limit" }
 
         then: "tools are registered on McpAsyncServer"
         echoTool != null
         errorTool != null
         emptyTool != null
         futureTool != null
+        rateLimitTool != null
 
         when: "building async tool specifications via factory without reflection"
         List<AsyncToolSpecification> rawSpecs = toolRegistry.getAsyncSpecs()
@@ -63,6 +67,7 @@ class ReactiveToolExecutionSpec extends Specification {
         def errorSpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_error" }, errorEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
         def emptySpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_empty" }, emptyEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
         def futureSpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_future" }, futureEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
+        def rateLimitSpec = ZenithMcpAsyncServerFactory.createAsyncToolSpecification(rawSpecs.find { it.tool().name() == "test_rate_limit" }, rateLimitEntry, binderRegistry, jsonMapper, context, exceptionMappers, schemaLoader)
 
         and: "invoking test_echo tool"
         CallToolRequest echoReq = new CallToolRequest("test_echo", Map.of("message", "reactive-world"))
@@ -106,6 +111,18 @@ class ReactiveToolExecutionSpec extends Specification {
         then: "IllegalArgumentException is mapped to McpError"
         def ex = thrown(McpError)
         ex.message.contains("Invalid reactive parameter")
+
+        when: "invoking test_rate_limit tool"
+        CallToolRequest rateLimitReq = new CallToolRequest("test_rate_limit", Collections.emptyMap())
+        Mono<CallToolResult> rateLimitMono = rateLimitSpec.callHandler().apply(null, rateLimitReq)
+        rateLimitMono.block()
+
+        then: "HTTP 429 is mapped to McpError with code -32029 and next allowable call context"
+        def rateLimitEx = thrown(McpError)
+        rateLimitEx.jsonRpcError.code == -32029
+        rateLimitEx.message.contains("Zendesk API rate limit exceeded (HTTP 429 Too Many Requests)")
+        rateLimitEx.message.contains("30 seconds")
+        rateLimitEx.message.contains("Next allowable call at:")
 
         cleanup:
         context?.close()
