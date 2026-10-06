@@ -356,52 +356,90 @@ public class ZendeskTicketTools {
         return validateProblemTarget(resolvedProblemId)
                 .then(resolveUploadTokens(uploadTokens, attachmentFilePaths))
                 .flatMap(tokens -> {
-                    validateCreateTicketInput(subject, initialComment, isPublic, tokens);
-
-                    TicketComment ticketComment = new TicketComment().setBody(initialComment);
-                    ticketComment.setIsPublic(isPublic);
-                    if (!tokens.isEmpty()) {
-                        ticketComment.setUploads(tokens);
-                    }
-                    TicketCreateInputWithTags input = new TicketCreateInputWithTags(ticketComment);
-                    input.setSubject(subject);
-                    input.setRawSubject(subject);
-
-                    applyPriorityAndStatus(input, priority, status);
-                    List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
-                    if (!parsedCustomFields.isEmpty()) {
-                        input.setCustomFields(parsedCustomFields);
-                    }
-                    applyRequesterAndType(input, requesterId, type);
-                    if (resolvedProblemId != null) {
-                        input.setType(TicketUpdateInputType.INCIDENT);
-                        input.setProblemId(resolvedProblemId);
-                    }
-
-                    final Long resolvedTicketFormId = resolveTicketFormId(ticketFormId, request);
-                    if (resolvedTicketFormId != null) {
-                        validateTicketFormBounds(resolvedTicketFormId);
-                        validateTicketForm(resolvedTicketFormId);
-                        input.setTicketFormId(resolvedTicketFormId);
-                    }
-
-                    final Long resolvedCustomStatusId = resolveCustomStatusId(customStatusId, request);
-                    if (resolvedCustomStatusId != null) {
-                        validateAndApplyCustomStatus(input, resolvedCustomStatusId, resolvedTicketFormId, status);
-                    }
-
-                    if (resolvedTags != null) {
-                        input.setTags(resolvedTags);
-                    }
-                    if (resolvedAdditionalTags != null) {
-                        input.setAdditionalTags(resolvedAdditionalTags);
-                    }
-                    if (resolvedRemoveTags != null) {
-                        input.setRemoveTags(resolvedRemoveTags);
-                    }
-
+                    TicketCreateInputWithTags input = buildTicketCreateInput(
+                            subject, initialComment, isPublic, tokens,
+                            priority, status, customFields, requesterId, type,
+                            resolvedProblemId, ticketFormId, customStatusId,
+                            resolvedTags, resolvedAdditionalTags, resolvedRemoveTags, request
+                    );
                     return ticketClient.createTicket(new TicketCreateRequest(input));
                 });
+    }
+
+    private TicketCreateInputWithTags buildTicketCreateInput(
+            String subject,
+            String initialComment,
+            Boolean isPublic,
+            List<String> tokens,
+            @Nullable String priority,
+            @Nullable String status,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long resolvedProblemId,
+            @Nullable Long ticketFormId,
+            @Nullable Long customStatusId,
+            @Nullable List<String> resolvedTags,
+            @Nullable List<String> resolvedAdditionalTags,
+            @Nullable List<String> resolvedRemoveTags,
+            @Nullable CallToolRequest request
+    ) {
+        validateCreateTicketInput(subject, initialComment, isPublic, tokens);
+
+        TicketComment ticketComment = new TicketComment().setBody(initialComment);
+        ticketComment.setIsPublic(isPublic);
+        if (!tokens.isEmpty()) {
+            ticketComment.setUploads(tokens);
+        }
+        TicketCreateInputWithTags input = new TicketCreateInputWithTags(ticketComment);
+        input.setSubject(subject);
+        input.setRawSubject(subject);
+
+        applyPriorityAndStatus(input, priority, status);
+        List<TicketCustomField> parsedCustomFields = parseCustomFields(customFields);
+        if (!parsedCustomFields.isEmpty()) {
+            input.setCustomFields(parsedCustomFields);
+        }
+        applyRequesterAndType(input, requesterId, type);
+        applyProblemLink(input, resolvedProblemId);
+
+        final Long resolvedTicketFormId = resolveTicketFormId(ticketFormId, request);
+        applyTicketForm(input, resolvedTicketFormId);
+
+        final Long resolvedCustomStatusId = resolveCustomStatusId(customStatusId, request);
+        if (resolvedCustomStatusId != null) {
+            validateAndApplyCustomStatus(input, resolvedCustomStatusId, resolvedTicketFormId, status);
+        }
+
+        applyCreateTags(input, resolvedTags, resolvedAdditionalTags, resolvedRemoveTags);
+        return input;
+    }
+
+    private void applyProblemLink(TicketCreateInput input, @Nullable Long resolvedProblemId) {
+        if (resolvedProblemId != null) {
+            input.setType(TicketUpdateInputType.INCIDENT);
+            input.setProblemId(resolvedProblemId);
+        }
+    }
+
+    private void applyTicketForm(TicketCreateInputWithTags input, @Nullable Long resolvedTicketFormId) {
+        if (resolvedTicketFormId != null) {
+            validateTicketFormBounds(resolvedTicketFormId);
+            validateTicketForm(resolvedTicketFormId);
+            input.setTicketFormId(resolvedTicketFormId);
+        }
+    }
+
+    private void applyCreateTags(TicketCreateInputWithTags input, @Nullable List<String> tags, @Nullable List<String> additionalTags, @Nullable List<String> removeTags) {
+        if (tags != null) {
+            input.setTags(tags);
+        }
+        if (additionalTags != null) {
+            input.setAdditionalTags(additionalTags);
+        }
+        if (removeTags != null) {
+            input.setRemoveTags(removeTags);
+        }
     }
 
     public Mono<TicketResponse> createTicket(
@@ -685,6 +723,19 @@ public class ZendeskTicketTools {
             @Nullable String subject
     ) {
         TicketUpdateInputWithForm input = new TicketUpdateInputWithForm();
+        applyUpdateTagsAndForm(input, ticketFormId, additionalTags, removeTags, tags);
+        populateInputFromParams(input, comment, status, priority, isPublic, tokens, customFields);
+        applyUpdateSubject(input, subject);
+        applyUpdateRequesterId(input, requesterId);
+        applyUpdateType(input, type, convertToIncident);
+
+        if (customStatusId != null) {
+            input.setCustomStatusId(customStatusId);
+        }
+        return input;
+    }
+
+    private void applyUpdateTagsAndForm(TicketUpdateInputWithForm input, @Nullable Long ticketFormId, @Nullable List<String> additionalTags, @Nullable List<String> removeTags, @Nullable List<String> tags) {
         if (ticketFormId != null) {
             input.setTicketFormId(ticketFormId);
         }
@@ -697,22 +748,27 @@ public class ZendeskTicketTools {
         if (tags != null) {
             input.setTags(tags);
         }
-        populateInputFromParams(input, comment, status, priority, isPublic, tokens, customFields);
+    }
 
+    private void applyUpdateSubject(TicketUpdateInput input, @Nullable String subject) {
         if (subject != null) {
             if (subject.isBlank()) {
                 throw new IllegalArgumentException("Ticket 'subject' cannot be empty.");
             }
             input.setSubject(subject);
         }
+    }
 
+    private void applyUpdateRequesterId(TicketUpdateInput input, @Nullable Long requesterId) {
         if (requesterId != null) {
             if (requesterId <= 0) {
                 throw new IllegalArgumentException("requesterId must be a positive integer, got: " + requesterId);
             }
             input.setRequesterId(requesterId);
         }
+    }
 
+    private void applyUpdateType(TicketUpdateInput input, @Nullable String type, @Nullable Boolean convertToIncident) {
         if (type != null) {
             if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
                 input.setType(null);
@@ -722,11 +778,6 @@ public class ZendeskTicketTools {
         } else if (Boolean.TRUE.equals(convertToIncident)) {
             input.setType(TicketUpdateInputType.INCIDENT);
         }
-
-        if (customStatusId != null) {
-            input.setCustomStatusId(customStatusId);
-        }
-        return input;
     }
 
     TicketUpdateInput buildTicketUpdateInput(
