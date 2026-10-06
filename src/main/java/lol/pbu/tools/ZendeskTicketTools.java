@@ -931,14 +931,17 @@ public class ZendeskTicketTools {
         return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, null, null, null, request);
     }
 
-    public Mono<TicketUpdateResponse> updateTicket(
-            Long ticketId,
-            TicketMutationOptions options,
-            @Nullable CallToolRequest request
-    ) {
-        TicketMutationOptions opt = options != null ? options : TicketMutationOptions.builder().build();
-        log.info("MCP Tool called: updateTicket(id={})", ticketId);
-        validateKnownParameters(request, "updateTicket", "ticketId", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_SUBJECT);
+    private record PreparedTicketMutation(
+            TicketMutationOptions resolvedOptions,
+            @Nullable Long resolvedTicketFormId,
+            @Nullable Long resolvedCustomStatusId,
+            @Nullable TicketFieldCustomStatusObject validatedCustomStatus,
+            boolean isTypeUnset,
+            @Nullable TicketUpdateInputType parsedType,
+            List<TicketCustomField> parsedCustomFields
+    ) {}
+
+    private PreparedTicketMutation prepareTicketMutation(TicketMutationOptions opt, @Nullable CallToolRequest request) {
         validateProblemTypeConflict(opt.problemId(), opt.type());
 
         final String resolvedSubject = resolveSubject(opt.subject(), request);
@@ -961,15 +964,29 @@ public class ZendeskTicketTools {
         final Long resolvedCustomStatusId = resolveCustomStatusId(resolvedOpt.customStatusId(), request);
         TicketFieldCustomStatusObject validatedCustomStatus = validateCustomStatusForMutation(resolvedCustomStatusId, resolvedTicketFormId, resolvedOpt.status());
 
-        List<TicketCustomField> parsedCustomFields = parseCustomFields(resolvedOpt.customFields());
         final boolean isTypeUnset = isTypeUnset(resolvedOpt.type());
         final TicketUpdateInputType parsedType = (resolvedOpt.type() != null && !isTypeUnset) ? parseTicketType(resolvedOpt.type()) : null;
+        List<TicketCustomField> parsedCustomFields = parseCustomFields(resolvedOpt.customFields());
 
-        return validateProblemTarget(resolvedOpt.problemId())
-                .then(resolveUploadTokens(resolvedOpt.uploadTokens(), resolvedOpt.attachmentFilePaths()))
+        return new PreparedTicketMutation(resolvedOpt, resolvedTicketFormId, resolvedCustomStatusId, validatedCustomStatus, isTypeUnset, parsedType, parsedCustomFields);
+    }
+
+    public Mono<TicketUpdateResponse> updateTicket(
+            Long ticketId,
+            TicketMutationOptions options,
+            @Nullable CallToolRequest request
+    ) {
+        TicketMutationOptions opt = options != null ? options : TicketMutationOptions.builder().build();
+        log.info("MCP Tool called: updateTicket(id={})", ticketId);
+        validateKnownParameters(request, "updateTicket", "ticketId", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_SUBJECT);
+
+        PreparedTicketMutation prep = prepareTicketMutation(opt, request);
+
+        return validateProblemTarget(prep.resolvedOptions().problemId())
+                .then(resolveUploadTokens(prep.resolvedOptions().uploadTokens(), prep.resolvedOptions().attachmentFilePaths()))
                 .flatMap(tokens -> {
-                    TicketUpdateInput input = buildTicketUpdateInput(resolvedOpt.comment(), resolvedOpt.status(), resolvedOpt.priority(), resolvedOpt.isPublic(), tokens, parsedCustomFields, resolvedOpt.requesterId(), resolvedOpt.type(), resolvedOpt.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId, resolvedAdditionalTags, resolvedRemoveTags, resolvedTags, resolvedOpt.subject());
-                    return resolveTicketUpdateInput(ticketId, resolvedOpt, input, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus)
+                    TicketUpdateInput input = buildTicketUpdateInput(prep.resolvedOptions().comment(), prep.resolvedOptions().status(), prep.resolvedOptions().priority(), prep.resolvedOptions().isPublic(), tokens, prep.parsedCustomFields(), prep.resolvedOptions().requesterId(), prep.resolvedOptions().type(), prep.resolvedOptions().convertToIncident(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.resolvedOptions().additionalTags(), prep.resolvedOptions().removeTags(), prep.resolvedOptions().tags(), prep.resolvedOptions().subject());
+                    return resolveTicketUpdateInput(ticketId, prep.resolvedOptions(), input, prep.parsedType(), prep.isTypeUnset(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus())
                             .flatMap(resolvedInput -> ticketClient.updateTicket(ticketId, new TicketUpdateRequest(resolvedInput)));
                 });
     }
@@ -1469,39 +1486,15 @@ public class ZendeskTicketTools {
         }
 
         int resolvedChunkSize = resolveChunkSize(chunkSize, request);
-        validateProblemTypeConflict(opt.problemId(), opt.type());
+        PreparedTicketMutation prep = prepareTicketMutation(opt, request);
 
-        final String resolvedSubject = resolveSubject(opt.subject(), request);
-        if (resolvedSubject != null && resolvedSubject.isBlank()) {
-            throw new IllegalArgumentException("Ticket 'subject' cannot be empty.");
-        }
-
-        final List<String> resolvedAdditionalTags = ToolValidationSupport.resolveAndValidateTags(opt.additionalTags(), PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, request);
-        final List<String> resolvedRemoveTags = ToolValidationSupport.resolveAndValidateTags(opt.removeTags(), PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, request);
-        final List<String> resolvedTags = ToolValidationSupport.resolveAndValidateTags(opt.tags(), PARAM_TAGS, null, request);
-
-        TicketMutationOptions resolvedOpt = opt.toBuilder()
-                .subject(resolvedSubject)
-                .additionalTags(resolvedAdditionalTags)
-                .removeTags(resolvedRemoveTags)
-                .tags(resolvedTags)
-                .build();
-
-        final Long resolvedTicketFormId = resolveAndValidateTicketFormId(resolvedOpt.ticketFormId(), request);
-        final Long resolvedCustomStatusId = resolveCustomStatusId(resolvedOpt.customStatusId(), request);
-        TicketFieldCustomStatusObject validatedCustomStatus = validateCustomStatusForMutation(resolvedCustomStatusId, resolvedTicketFormId, resolvedOpt.status());
-
-        final boolean isTypeUnset = isTypeUnset(resolvedOpt.type());
-        final TicketUpdateInputType parsedType = (resolvedOpt.type() != null && !isTypeUnset) ? parseTicketType(resolvedOpt.type()) : null;
-        List<TicketCustomField> parsedCustomFields = parseCustomFields(resolvedOpt.customFields());
-
-        return validateProblemTarget(resolvedOpt.problemId())
-                .then(resolveUploadTokens(resolvedOpt.uploadTokens(), resolvedOpt.attachmentFilePaths()))
+        return validateProblemTarget(prep.resolvedOptions().problemId())
+                .then(resolveUploadTokens(prep.resolvedOptions().uploadTokens(), prep.resolvedOptions().attachmentFilePaths()))
                 .flatMap(tokens -> {
                     if (!Boolean.FALSE.equals(asyncBulk)) {
-                        return executeAsyncBulkBatchUpdate(distinctIds, resolvedChunkSize, resolvedOpt, tokens, parsedCustomFields, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset);
+                        return executeAsyncBulkBatchUpdate(distinctIds, resolvedChunkSize, prep.resolvedOptions(), tokens, prep.parsedCustomFields(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus(), prep.parsedType(), prep.isTypeUnset());
                     }
-                    return executeConcurrentBatchUpdate(distinctIds, resolvedOpt, tokens, parsedCustomFields, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset);
+                    return executeConcurrentBatchUpdate(distinctIds, prep.resolvedOptions(), tokens, prep.parsedCustomFields(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus(), prep.parsedType(), prep.isTypeUnset());
                 });
     }
 
