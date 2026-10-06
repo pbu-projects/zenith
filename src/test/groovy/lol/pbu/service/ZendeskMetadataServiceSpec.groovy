@@ -15,11 +15,11 @@
  */
 package lol.pbu.service
 
-import lol.pbu.client.CustomStatusClient
-import lol.pbu.model.CustomStatusesResponse
-import lol.pbu.model.TicketFormStatus
-import lol.pbu.model.TicketFormStatusesResponse
+import lol.pbu.z4j.client.CustomStatusClient
 import lol.pbu.z4j.client.TicketFormsClient
+import lol.pbu.z4j.model.CustomStatusesResponse
+import lol.pbu.z4j.model.TicketFormStatus
+import lol.pbu.z4j.model.TicketFormStatusesResponse
 import lol.pbu.z4j.model.Ticket
 import lol.pbu.z4j.model.TicketFieldCustomStatusObject
 import lol.pbu.z4j.model.TicketFieldCustomStatusObjectStatusCategory

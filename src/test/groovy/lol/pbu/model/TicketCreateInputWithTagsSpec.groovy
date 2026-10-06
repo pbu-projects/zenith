@@ -22,6 +22,8 @@ import lol.pbu.z4j.model.TicketComment
 import lol.pbu.z4j.model.TicketUpdateInputPriority
 import spock.lang.Specification
 
+import java.util.Map
+
 @MicronautTest
 class TicketCreateInputWithTagsSpec extends Specification {
 
@@ -104,10 +106,12 @@ class TicketCreateInputWithTagsSpec extends Specification {
         str.contains("super=")
     }
 
-    def "serde serialization writes additional_tags and remove_tags properties"() {
+    def "serde serialization writes ticket_form_id, custom_status_id, additional_tags, and remove_tags properties"() {
         given:
         def input = new TicketCreateInputWithTags(new TicketComment().tap { body = "Create test" }).tap {
             subject = "Subject test"
+            ticketFormId = 1001L
+            customStatusId = 101L
             tags = ["main_tag"]
             additionalTags = ["created_tag"]
             removeTags = ["old_tag"]
@@ -115,12 +119,16 @@ class TicketCreateInputWithTagsSpec extends Specification {
 
         when:
         def json = objectMapper.writeValueAsString(input)
+        Map<String, Object> map = objectMapper.readValue(json, Map)
 
         then:
-        json.contains('"subject":"Subject test"')
-        json.contains('"tags":["main_tag"]')
-        json.contains('"additional_tags":["created_tag"]')
-        json.contains('"remove_tags":["old_tag"]')
-        json.contains('"body":"Create test"')
+        map.subject == "Subject test"
+        map.ticket_form_id == 1001
+        map.custom_status_id == 101
+        map.tags == ["main_tag"]
+        map.additional_tags == ["created_tag"]
+        map.remove_tags == ["old_tag"]
+        map.comment instanceof Map
+        ((Map) map.comment).body == "Create test"
     }
 }

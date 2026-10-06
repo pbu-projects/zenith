@@ -22,6 +22,8 @@ import lol.pbu.z4j.model.TicketComment
 import lol.pbu.z4j.model.TicketUpdateInputPriority
 import spock.lang.Specification
 
+import java.util.Map
+
 @MicronautTest
 class TicketUpdateInputWithFormSpec extends Specification {
 
@@ -120,10 +122,11 @@ class TicketUpdateInputWithFormSpec extends Specification {
         str.contains("super=")
     }
 
-    def "serde serialization writes ticket_form_id, additional_tags, and remove_tags properties"() {
+    def "serde serialization writes ticket_form_id, custom_status_id, additional_tags, and remove_tags properties"() {
         given:
         def input = new TicketUpdateInputWithForm().tap {
             ticketFormId = 1001L
+            customStatusId = 101L
             additionalTags = ["urgency", "vip"]
             removeTags = ["stale"]
             comment = new TicketComment().tap { body = "Test comment" }
@@ -131,11 +134,14 @@ class TicketUpdateInputWithFormSpec extends Specification {
 
         when:
         def json = objectMapper.writeValueAsString(input)
+        Map<String, Object> map = objectMapper.readValue(json, Map)
 
         then:
-        json.contains('"ticket_form_id":1001')
-        json.contains('"additional_tags":["urgency","vip"]')
-        json.contains('"remove_tags":["stale"]')
-        json.contains('"body":"Test comment"')
+        map.ticket_form_id == 1001
+        map.custom_status_id == 101
+        map.additional_tags == ["urgency", "vip"]
+        map.remove_tags == ["stale"]
+        map.comment instanceof Map
+        ((Map) map.comment).body == "Test comment"
     }
 }
