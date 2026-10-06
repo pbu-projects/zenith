@@ -6,15 +6,7 @@ import com.sun.net.httpserver.HttpServer
 import groovy.json.JsonSlurper
 import io.micronaut.context.ApplicationContext
 import io.micronaut.http.client.exceptions.HttpClientResponseException
-import lol.pbu.client.CustomStatusClient
-import lol.pbu.model.TicketMutationOptions
-import lol.pbu.tools.ZendeskCommunityTools
-import lol.pbu.tools.ZendeskCustomObjectTools
-import lol.pbu.tools.ZendeskHelpCenterTools
-import lol.pbu.tools.ZendeskMetadataTools
-import lol.pbu.tools.ZendeskSearchTools
-import lol.pbu.tools.ZendeskTicketTools
-import lol.pbu.tools.ZendeskViewTools
+import lol.pbu.z4j.client.CustomStatusClient
 import spock.lang.Shared
 import spock.lang.Specification
 
@@ -122,6 +114,10 @@ class ZendeskIntegrationSpec extends Specification {
     def cleanupSpec() {
         context?.close()
         server?.stop(0)
+    }
+
+    def setup() {
+        handler.clearRequests()
     }
 
     def "Help Center articles end-to-end integration via embedded HTTP server"() {
@@ -374,8 +370,8 @@ class ZendeskIntegrationSpec extends Specification {
                 null,
                 101L,
                 1001L,
-                null,
-                null,
+                ["add_tag"],
+                ["rem_tag"],
                 ["tag1"],
                 null
         )
@@ -394,6 +390,8 @@ class ZendeskIntegrationSpec extends Specification {
         createPayload.ticket.custom_status_id == 101
         createPayload.ticket.ticket_form_id == 1001
         createPayload.ticket.tags == ["tag1"]
+        createPayload.ticket.additional_tags == ["add_tag"]
+        createPayload.ticket.remove_tags == ["rem_tag"]
 
         when: "updating a ticket with customStatusId and form"
         def updatedTicket = ticketTools.updateTicket(
@@ -411,8 +409,8 @@ class ZendeskIntegrationSpec extends Specification {
                 null,
                 101L,
                 1001L,
-                null,
-                null,
+                ["add_update_tag"],
+                ["rem_update_tag"],
                 ["new_tag"],
                 null
         )
@@ -429,6 +427,8 @@ class ZendeskIntegrationSpec extends Specification {
         updatePayload.ticket.custom_status_id == 101
         updatePayload.ticket.ticket_form_id == 1001
         updatePayload.ticket.tags == ["new_tag"]
+        updatePayload.ticket.additional_tags == ["add_update_tag"]
+        updatePayload.ticket.remove_tags == ["rem_update_tag"]
 
         when: "batch updating tickets concurrently"
         def batchImmediate = ticketTools.batchUpdateTickets(
@@ -692,7 +692,13 @@ class ZendeskIntegrationSpec extends Specification {
         final List<CapturedRequest> requests = new CopyOnWriteArrayList<>()
 
         CapturedRequest findLastRequest(String method, String pathPrefix) {
-            return requests.reverse().find { it.method == method && it.path.startsWith(pathPrefix) }
+            for (int i = requests.size() - 1; i >= 0; i--) {
+                def req = requests[i]
+                if (req.method == method && req.path.startsWith(pathPrefix)) {
+                    return req
+                }
+            }
+            return null
         }
 
         void clearRequests() {
