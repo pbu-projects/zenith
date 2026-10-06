@@ -11,7 +11,9 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lol.pbu.model.BatchUpdateResponse;
 import lol.pbu.model.BatchUpdateResponse.TicketUpdateResult;
+import lol.pbu.model.TicketCreateInputWithTags;
 import lol.pbu.model.TicketMutationOptions;
+import lol.pbu.model.TicketUpdateInputWithForm;
 import lol.pbu.service.ZendeskMetadataService;
 import lol.pbu.z4j.client.AttachmentClient;
 import lol.pbu.z4j.client.JobStatusClient;
@@ -355,7 +357,7 @@ public class ZendeskTicketTools {
                     if (!tokens.isEmpty()) {
                         ticketComment.setUploads(tokens);
                     }
-                    TicketCreateInput input = new TicketCreateInput(ticketComment);
+                    TicketCreateInputWithTags input = new TicketCreateInputWithTags(ticketComment);
                     input.setSubject(subject);
                     input.setRawSubject(subject);
 
@@ -650,7 +652,7 @@ public class ZendeskTicketTools {
             List<String> removeTags,
             List<String> tags
     ) {
-        TicketUpdateInput input = new TicketUpdateInput();
+        TicketUpdateInputWithForm input = new TicketUpdateInputWithForm();
         if (ticketFormId != null) {
             input.setTicketFormId(ticketFormId);
         }

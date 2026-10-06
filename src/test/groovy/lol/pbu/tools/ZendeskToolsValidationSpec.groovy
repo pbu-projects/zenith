@@ -29,14 +29,14 @@ import lol.pbu.z4j.model.JobStatusResponse
 import lol.pbu.z4j.model.LocaleAbbreviation
 import lol.pbu.z4j.model.SortArticleBy
 import lol.pbu.z4j.model.SortOrder
+import lol.pbu.model.TicketCreateInputWithTags
 import lol.pbu.model.TicketMutationOptions
+import lol.pbu.model.TicketUpdateInputWithForm
 import lol.pbu.service.ZendeskMetadataService
 import lol.pbu.z4j.client.CustomStatusClient
 import lol.pbu.z4j.model.CustomStatusesResponse
-import lol.pbu.z4j.model.TicketCreateInput
 import lol.pbu.z4j.model.TicketFormStatus
 import lol.pbu.z4j.model.TicketFormStatusesResponse
-import lol.pbu.z4j.model.TicketUpdateInput
 import lol.pbu.z4j.model.Ticket
 import lol.pbu.z4j.model.TicketAuditsResponse
 import lol.pbu.z4j.model.TicketForm
@@ -2229,10 +2229,10 @@ class ZendeskToolsValidationSpec extends Specification {
         when: "calling updateTicket with ticketFormId"
         tools.updateTicket(100L, "Switching to bug form", null, null, true, null, null, null, null, null, null, null, null, 1002L, null)
 
-        then: "captured request contains TicketUpdateInput with ticketFormId set"
+        then: "captured request contains TicketUpdateInputWithForm with ticketFormId set"
         capturedReq != null
-        capturedReq.ticket instanceof TicketUpdateInput
-        ((TicketUpdateInput) capturedReq.ticket).ticketFormId == 1002L
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedReq.ticket).ticketFormId == 1002L
 
         when: "calling updateTicket with snake_case ticket_form_id in CallToolRequest"
         capturedReq = null
@@ -2241,8 +2241,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then: "ticket form id is resolved from snake_case request arguments"
         capturedReq != null
-        capturedReq.ticket instanceof TicketUpdateInput
-        ((TicketUpdateInput) capturedReq.ticket).ticketFormId == 1001L
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedReq.ticket).ticketFormId == 1001L
     }
 
     def "updateTicket validates ticketFormId bounds and active status"() {
@@ -2290,16 +2290,16 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then: "concurrent ticket update input contains ticketFormId"
         capturedConcurrentReq != null
-        capturedConcurrentReq.ticket instanceof TicketUpdateInput
-        ((TicketUpdateInput) capturedConcurrentReq.ticket).ticketFormId == 1001L
+        capturedConcurrentReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedConcurrentReq.ticket).ticketFormId == 1001L
 
         when: "running async bulk batch update with ticketFormId"
         tools.batchUpdateTickets([100L], null, null, null, null, null, null, true, null, null, null, null, null, null, 1002L, null)
 
         then: "bulk ticket update input contains ticketFormId"
         capturedBulkReq != null
-        capturedBulkReq.ticket instanceof TicketUpdateInput
-        ((TicketUpdateInput) capturedBulkReq.ticket).ticketFormId == 1002L
+        capturedBulkReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedBulkReq.ticket).ticketFormId == 1002L
     }
 
     def "ticket forms are cached and refreshed via clearTicketFormCache and clearAllCaches"() {
@@ -2366,8 +2366,8 @@ class ZendeskToolsValidationSpec extends Specification {
         capturedReq.ticket.status == TicketUpdateInputStatus.OPEN
         capturedReq.ticket.priority == TicketUpdateInputPriority.HIGH
         capturedReq.ticket.customStatusId == 101L
-        capturedReq.ticket instanceof TicketUpdateInput
-        ((TicketUpdateInput) capturedReq.ticket).ticketFormId == 1001L
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        ((TicketUpdateInputWithForm) capturedReq.ticket).ticketFormId == 1001L
     }
 
     def "batchUpdateTickets using TicketMutationOptions builder updates multiple tickets"() {
@@ -2404,8 +2404,8 @@ class ZendeskToolsValidationSpec extends Specification {
         response.results.every { it.success }
         capturedRequests.size() == 2
         capturedRequests.every { req ->
-            req.ticket instanceof TicketUpdateInput &&
-            ((TicketUpdateInput) req.ticket).ticketFormId == 1001L &&
+            req.ticket instanceof TicketUpdateInputWithForm &&
+            ((TicketUpdateInputWithForm) req.ticket).ticketFormId == 1001L &&
             req.ticket.customStatusId == 101L &&
             req.ticket.comment.body == "Batch update via options builder" &&
             req.ticket.comment.isPublic == false
@@ -3617,8 +3617,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         capturedReq != null
-        capturedReq.ticket instanceof TicketCreateInput
-        def tagInput = (TicketCreateInput) capturedReq.ticket
+        capturedReq.ticket instanceof TicketCreateInputWithTags
+        def tagInput = (TicketCreateInputWithTags) capturedReq.ticket
         tagInput.additionalTags == ["add1", "add2"]
         tagInput.removeTags == ["rem1"]
         tagInput.tags == ["base1", "base2"]
@@ -3636,8 +3636,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         capturedReq != null
-        capturedReq.ticket instanceof TicketCreateInput
-        def snakeTagInput = (TicketCreateInput) capturedReq.ticket
+        capturedReq.ticket instanceof TicketCreateInputWithTags
+        def snakeTagInput = (TicketCreateInputWithTags) capturedReq.ticket
         snakeTagInput.additionalTags == ["snake_add"]
         snakeTagInput.removeTags == ["snake_rem"]
         snakeTagInput.tags == ["snake_tags"]
@@ -3660,8 +3660,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         capturedReq != null
-        capturedReq.ticket instanceof TicketUpdateInput
-        def tagInput = (TicketUpdateInput) capturedReq.ticket
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        def tagInput = (TicketUpdateInputWithForm) capturedReq.ticket
         tagInput.additionalTags == ["add_tag"]
         tagInput.removeTags == ["rem_tag"]
         tagInput.tags == ["fixed_tag"]
@@ -3677,8 +3677,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         capturedReq != null
-        capturedReq.ticket instanceof TicketUpdateInput
-        def snakeTagInput = (TicketUpdateInput) capturedReq.ticket
+        capturedReq.ticket instanceof TicketUpdateInputWithForm
+        def snakeTagInput = (TicketUpdateInputWithForm) capturedReq.ticket
         snakeTagInput.additionalTags == ["snake_add_2"]
         snakeTagInput.removeTags == ["snake_rem_2"]
         snakeTagInput.tags == ["snake_tags_2"]
@@ -3710,8 +3710,8 @@ class ZendeskToolsValidationSpec extends Specification {
         concurrentResp.results.size() == 1
         concurrentResp.results[0].success
         capturedConcurrentReq != null
-        capturedConcurrentReq.ticket instanceof TicketUpdateInput
-        def concurrentInput = (TicketUpdateInput) capturedConcurrentReq.ticket
+        capturedConcurrentReq.ticket instanceof TicketUpdateInputWithForm
+        def concurrentInput = (TicketUpdateInputWithForm) capturedConcurrentReq.ticket
         concurrentInput.additionalTags == ["bulk_add"]
         concurrentInput.removeTags == ["bulk_rem"]
         concurrentInput.tags == ["bulk_tag"]
@@ -3728,8 +3728,8 @@ class ZendeskToolsValidationSpec extends Specification {
         bulkResp.jobStatus != null
         bulkResp.jobStatus.id == "job-tags-1"
         capturedBulkReq != null
-        capturedBulkReq.ticket instanceof TicketUpdateInput
-        def bulkInput = (TicketUpdateInput) capturedBulkReq.ticket
+        capturedBulkReq.ticket instanceof TicketUpdateInputWithForm
+        def bulkInput = (TicketUpdateInputWithForm) capturedBulkReq.ticket
         bulkInput.additionalTags == ["async_add"]
         bulkInput.removeTags == ["async_rem"]
         bulkInput.tags == ["async_tag"]
