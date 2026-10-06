@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -351,7 +352,7 @@ public class HttpClientResponseExceptionMcpErrorMapper implements McpErrorExcept
             return detailsNode.coerceStringValue();
         }
         List<String> entries = new ArrayList<>();
-        for (Map.Entry<String, JsonNode> entry : detailsNode.entries()) {
+        for (Entry<String, JsonNode> entry : detailsNode.entries()) {
             String key = entry.getKey();
             entries.add(key + ": " + formatDetailValue(entry.getValue()));
         }

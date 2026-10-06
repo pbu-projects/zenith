@@ -3988,6 +3988,325 @@ class ZendeskToolsValidationSpec extends Specification {
         def ex = thrown(IllegalArgumentException)
         ex.message.contains("Unrecognized parameter: 'unknownField'")
     }
+
+    def "createTicket atomically links to problemId ticket and sets type to incident"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.showTicket(200L) >> Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(200L).tap {
+                id = 200L
+                type = TicketType.PROBLEM
+            }
+        })
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketResponse().tap {
+                ticket = new Ticket(500L).tap {
+                    id = 500L
+                    subject = req.ticket.subject
+                    type = TicketType.INCIDENT
+                    problemId = req.ticket.problemId
+                }
+            })
+        }
+
+        when: "creating an incident ticket directly linked to problem #200"
+        def resp = tools.createTicket(
+                "Incident ticket subject",
+                "Incident description",
+                true,
+                "high",
+                "open",
+                null,
+                null,
+                null,
+                123L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                200L,
+                null
+        )
+
+        then:
+        resp != null
+        capturedReq != null
+        capturedReq.ticket.subject == "Incident ticket subject"
+        capturedReq.ticket.rawSubject == "Incident ticket subject"
+        capturedReq.ticket.problemId == 200L
+        capturedReq.ticket.type == TicketUpdateInputType.INCIDENT
+        capturedReq.ticket.requesterId == 123L
+    }
+
+    def "createTicket resolves problemId from CallToolRequest arguments"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.showTicket(300L) >> Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(300L).tap {
+                id = 300L
+                type = TicketType.PROBLEM
+            }
+        })
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketResponse().tap {
+                ticket = new Ticket(501L).tap { id = 501L }
+            })
+        }
+        def req = new CallToolRequest("createTicket", [
+                subject: "Incident via CallToolRequest",
+                comment: "Comment text",
+                isPublic: true,
+                problemId: 300L
+        ])
+
+        when:
+        def resp = tools.createTicket(
+                "Incident via CallToolRequest",
+                "Comment text",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                req
+        )
+
+        then:
+        resp != null
+        capturedReq != null
+        capturedReq.ticket.problemId == 300L
+        capturedReq.ticket.type == TicketUpdateInputType.INCIDENT
+    }
+
+    def "createTicket rejects invalid problemId target or conflicting type"() {
+        given:
+        ticketClient.showTicket(201L) >> Mono.just(new TicketResponse().tap {
+            ticket = new Ticket(201L).tap {
+                id = 201L
+                type = TicketType.INCIDENT
+            }
+        })
+        ticketClient.showTicket(999L) >> Mono.empty()
+
+        when: "linking to non-existent problem ticket"
+        tools.createTicket("Subj", "Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, 999L, null).block()
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Target problem ticket #999 could not be retrieved")
+
+        when: "linking to target ticket that is not a problem"
+        tools.createTicket("Subj", "Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, 201L, null).block()
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Target ticket #201 is not of type 'problem'")
+
+        when: "linking to non-positive problemId"
+        tools.createTicket("Subj", "Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, -1L, null).block()
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("problemId must be a positive integer, got: -1")
+
+        when: "specifying conflicting type other than incident when linking to problem"
+        tools.createTicket("Subj", "Comment", true, null, null, null, null, null, null, "problem", null, null, null, null, null, 200L, null)
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("Cannot specify type 'problem' when linking to a problem ticket")
+    }
+
+    def "updateTicket updates subject successfully"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketUpdateResponse().tap {
+                ticket = new Ticket(100L).tap {
+                    subject = req.ticket.subject
+                }
+            })
+        }
+
+        when: "updating subject via positional argument"
+        def r1 = tools.updateTicket(
+                100L,
+                "Note",
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Updated Subject Line",
+                null
+        )
+
+        then:
+        r1 != null
+        capturedReq != null
+        capturedReq.ticket.subject == "Updated Subject Line"
+
+        when: "updating subject via TicketMutationOptions"
+        capturedReq = null
+        def opt = TicketMutationOptions.builder()
+                .subject("Subject from Options")
+                .comment("Options note")
+                .isPublic(false)
+                .build()
+        def r2 = tools.updateTicket(100L, opt, null)
+
+        then:
+        r2 != null
+        capturedReq != null
+        capturedReq.ticket.subject == "Subject from Options"
+
+        when: "updating subject via CallToolRequest"
+        capturedReq = null
+        def req = new CallToolRequest("updateTicket", [ticketId: 100L, subject: "Subject from Request"])
+        def r3 = tools.updateTicket(100L, null, req)
+
+        then:
+        r3 != null
+        capturedReq != null
+        capturedReq.ticket.subject == "Subject from Request"
+    }
+
+    def "updateTicket rejects blank or empty subject"() {
+        when: "passing empty subject via options"
+        tools.updateTicket(100L, TicketMutationOptions.builder().subject("").build(), null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message == "Ticket 'subject' cannot be empty."
+
+        when: "passing whitespace-only subject via options"
+        tools.updateTicket(100L, TicketMutationOptions.builder().subject("   ").build(), null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message == "Ticket 'subject' cannot be empty."
+
+        when: "passing empty subject via CallToolRequest"
+        tools.updateTicket(100L, null, new CallToolRequest("updateTicket", [ticketId: 100L, subject: ""]))
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message == "Ticket 'subject' cannot be empty."
+    }
+
+    def "batchUpdateTickets updates subject in asyncBulk and concurrent modes"() {
+        given:
+        TicketUpdateRequest capturedBulkReq = null
+        TicketUpdateRequest capturedConcReq = null
+        ticketClient.updateManyTickets("101,102", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            capturedBulkReq = req
+            Mono.just(new JobStatusResponse().tap {
+                jobStatus = new JobStatus().tap { id = "job-bulk-subj" }
+            })
+        }
+        ticketClient.updateTicket(_ as Long, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedConcReq = req
+            Mono.just(new TicketUpdateResponse().tap {
+                ticket = new Ticket(id).tap { subject = req.ticket.subject }
+            })
+        }
+
+        when: "batch updating subject in asyncBulk mode"
+        def rBulk = tools.batchUpdateTickets(
+                [101L, 102L],
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Batch Bulk Subject",
+                null,
+                null
+        )
+
+        then:
+        rBulk != null
+        capturedBulkReq != null
+        capturedBulkReq.ticket.subject == "Batch Bulk Subject"
+
+        when: "batch updating subject in concurrent mode"
+        def rConc = tools.batchUpdateTickets(
+                [101L, 102L],
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Concurrent Batch Subject",
+                null,
+                null
+        )
+
+        then:
+        rConc != null
+        capturedConcReq != null
+        capturedConcReq.ticket.subject == "Concurrent Batch Subject"
+
+        when: "batch updating with empty subject"
+        tools.batchUpdateTickets(
+                [101L],
+                TicketMutationOptions.builder().subject("").build(),
+                true,
+                null
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message == "Ticket 'subject' cannot be empty."
+    }
 }
 
 
