@@ -519,6 +519,101 @@ class ZendeskIntegrationSpec extends Specification {
         tempFile?.delete()
     }
 
+    def "ticket mutation wire payloads contain subject and problem_id for issue #67"() {
+        when: "creating an incident ticket linked to problem #200"
+        def createdIncident = ticketTools.createTicket(
+                "Atomic Incident",
+                "Incident details note",
+                true,
+                "high",
+                "open",
+                null,
+                null,
+                null,
+                100L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                200L,
+                null
+        )
+
+        then:
+        createdIncident != null
+        def createReq = handler.findLastRequest("POST", "/api/v2/tickets")
+        createReq != null
+        def createPayload = new JsonSlurper().parseText(createReq.body)
+        createPayload.ticket.subject == "Atomic Incident"
+        createPayload.ticket.problem_id == 200
+        createPayload.ticket.type == "incident"
+        createPayload.ticket.requester_id == 100
+
+        when: "updating an existing ticket with a new subject"
+        def updated = ticketTools.updateTicket(
+                1L,
+                "Updating subject note",
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Updated Wire Subject",
+                null
+        )
+
+        then:
+        updated != null
+        def updateReq = handler.findLastRequest("PUT", "/api/v2/tickets/1")
+        updateReq != null
+        def updatePayload = new JsonSlurper().parseText(updateReq.body)
+        updatePayload.ticket.subject == "Updated Wire Subject"
+
+        when: "batch updating tickets with a new subject via async bulk"
+        def bulk = ticketTools.batchUpdateTickets(
+                [1L],
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Bulk Wire Subject",
+                null,
+                null
+        )
+
+        then:
+        bulk != null
+        def bulkReq = handler.findLastRequest("PUT", "/api/v2/tickets/update_many")
+        bulkReq != null
+        def bulkPayload = new JsonSlurper().parseText(bulkReq.body)
+        bulkPayload.ticket.subject == "Bulk Wire Subject"
+    }
+
     def "Ticket forms and ticket fields discovery via embedded HTTP server"() {
         when: "listing ticket forms"
         def formsResp = metadataTools.listTicketForms()
@@ -803,6 +898,9 @@ class ZendeskIntegrationSpec extends Specification {
                 } else {
                     sendResponse(exchange, 200, '{"ticket":{"id":1,"subject":"Ticket 1","status":"open","custom_status_id":101,"ticket_form_id":1001,"tags":["sample_tag"],"requester_id":100}}')
                 }
+                return
+            } else if (normPath == "/api/v2/tickets/200") {
+                sendResponse(exchange, 200, '{"ticket":{"id":200,"subject":"Problem Parent Ticket","status":"open","type":"problem","requester_id":100}}')
                 return
             }
 
