@@ -148,7 +148,7 @@ public class ZendeskTicketTools {
         validateKnownParameters(request, "getTickets", "ticketIds", PARAM_CHUNK_SIZE, PARAM_CHUNK_SIZE_SNAKE, PARAM_BATCH_SIZE, PARAM_BATCH_SIZE_SNAKE);
         List<Long> distinctIds = parseDistinctTicketIds(ticketIds);
         if (distinctIds.isEmpty()) {
-            return Mono.just(new TicketsResponse(Collections.emptyList()));
+            return Mono.just(new TicketsResponse(Collections.emptyList(), null, null, null));
         }
 
         int resolvedChunkSize = resolveChunkSize(chunkSize, request);
@@ -211,7 +211,7 @@ public class ZendeskTicketTools {
             String missingStr = missingIds.stream().map(Object::toString).collect(Collectors.joining(", "));
             throw new IllegalStateException(String.format("Failed to fetch tickets [%s]: [EmptyResult] Tickets not found", missingStr));
         }
-        return new TicketsResponse(allTickets);
+        return new TicketsResponse(allTickets, null, null, allTickets.size());
     }
 
     private static int resolveConfiguredChunkSize(@Nullable Integer configured) {

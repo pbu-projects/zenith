@@ -62,7 +62,7 @@ Add to your MCP client config:
 * `listViews`: List all views configured in Zendesk.
 * `listActiveViews`: List only active views configured in Zendesk.
 * `getView`: Fetch view metadata and details by ID.
-* `getViewTickets`: Get tickets from a specific Zendesk view by its numeric ID.
+* `getViewTickets`: Get lean tickets from a specific Zendesk view by its numeric ID with cursor pagination, optional auto-paging, and filtered custom fields.
 * `executeView`: Execute a specific view to inspect ticket rows and columns.
 * `getViewTicketCount`: Get the ticket count for a specific view.
 

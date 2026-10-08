@@ -29,10 +29,14 @@ import lol.pbu.z4j.model.JobStatusResponse
 import lol.pbu.z4j.model.LocaleAbbreviation
 import lol.pbu.z4j.model.SortArticleBy
 import lol.pbu.z4j.model.SortOrder
+import lol.pbu.model.LeanTicket
 import lol.pbu.model.TicketCreateInputWithTags
 import lol.pbu.model.TicketMutationOptions
 import lol.pbu.model.TicketUpdateInputWithForm
+import lol.pbu.model.ViewTicketsResult
 import lol.pbu.service.ZendeskMetadataService
+import lol.pbu.z4j.model.Meta
+import lol.pbu.z4j.model.TicketCustomField
 import lol.pbu.z4j.client.CustomStatusClient
 import lol.pbu.z4j.model.CustomStatusesResponse
 import lol.pbu.z4j.model.TicketFormStatus
@@ -3808,10 +3812,10 @@ class ZendeskToolsValidationSpec extends Specification {
         ticketClient.showMultipleTickets(ids1) >> Mono.just(new TicketsResponse([
                 new Ticket().tap { id = 101L; subject = "Ticket 101" },
                 new Ticket().tap { id = 102L; subject = "Ticket 102" }
-        ]))
+        ], null, null, null))
         ticketClient.showMultipleTickets(ids2) >> Mono.just(new TicketsResponse([
                 new Ticket().tap { id = 103L; subject = "Ticket 103" }
-        ]))
+        ], null, null, null))
 
         when: "calling getTickets with explicit chunkSize=2"
         def resp = tools.getTickets([101L, 102L, 103L], 2)
@@ -3826,7 +3830,7 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         ticketClient.showMultipleTickets([101L, 102L, 103L]) >> Mono.just(new TicketsResponse([
                 new Ticket().tap { id = 101L; subject = "Ticket 101" }
-        ]))
+        ], null, null, null))
 
         when: "fetching tickets where multiple are missing"
         tools.getTickets([101L, 102L, 103L])
@@ -3883,10 +3887,10 @@ class ZendeskToolsValidationSpec extends Specification {
         ticketClient.showMultipleTickets(ids1) >> Mono.just(new TicketsResponse([
                 new Ticket().tap { id = 101L; subject = "Ticket 101" },
                 new Ticket().tap { id = 102L; subject = "Ticket 102" }
-        ]))
+        ], null, null, null))
         ticketClient.showMultipleTickets(ids2) >> Mono.just(new TicketsResponse([
                 new Ticket().tap { id = 103L; subject = "Ticket 103" }
-        ]))
+        ], null, null, null))
 
         when: "calling getTickets with 3 IDs without chunkSize parameter"
         def resp = configuredTools.getTickets([101L, 102L, 103L]).block()
@@ -3941,7 +3945,7 @@ class ZendeskToolsValidationSpec extends Specification {
         given:
         ticketClient.showMultipleTickets([101L]) >> Mono.just(new TicketsResponse([
                 new Ticket().tap { id = 101L }
-        ]))
+        ], null, null, null))
         ticketClient.updateManyTickets("101", _ as TicketUpdateRequest) >> Mono.just(new JobStatusResponse(
                 new JobStatus().tap { id = "job-snake-chunk" }
         ))
@@ -4306,6 +4310,71 @@ class ZendeskToolsValidationSpec extends Specification {
         then:
         def e = thrown(IllegalArgumentException)
         e.message == "Ticket 'subject' cannot be empty."
+    }
+
+    def "getViewTickets returns ViewTicketsResult with tickets, returnedCount, hasMore, and nextCursor"() {
+        given:
+        def ticket = new Ticket().tap {
+            id = 100L
+            subject = "View Ticket Test"
+            customFields = [new TicketCustomField.Raw(1L, "val")]
+        }
+        def meta = new Meta().tap {
+            hasMore = true
+            afterCursor = "cur-123"
+        }
+        viewClient.listTicketsForView(50L, null, 100) >> Mono.just(new TicketsResponse([ticket], meta, null, 25))
+
+        when:
+        def result = tools.getViewTickets(50L)
+
+        then:
+        result instanceof ViewTicketsResult
+        result.returnedCount == 1
+        result.totalCount == 25
+        result.hasMore
+        result.nextCursor == "cur-123"
+        result.tickets.size() == 1
+        result.tickets[0].id == 100L
+        result.tickets[0].subject == "View Ticket Test"
+        result.tickets[0].customFields == null
+    }
+
+    def "getViewTickets with includeCustomFields filters out null and empty values"() {
+        given:
+        def ticket = new Ticket().tap {
+            id = 101L
+            subject = "Custom Fields Validation"
+            customFields = [
+                    new TicketCustomField.Raw(1L, "valid"),
+                    new TicketCustomField.Raw(2L, null),
+                    new TicketCustomField.Raw(3L, "")
+            ]
+        }
+        viewClient.listTicketsForView(50L, null, 100) >> Mono.just(new TicketsResponse([ticket], new Meta(), null, 1))
+
+        when:
+        def result = tools.getViewTickets(50L, null, null, false, true)
+
+        then:
+        result instanceof ViewTicketsResult
+        result.tickets.size() == 1
+        result.tickets[0].customFields != null
+        result.tickets[0].customFields.size() == 1
+        result.tickets[0].customFields[0].id() == 1L
+        result.tickets[0].customFields[0].value() == "valid"
+    }
+
+    def "getViewTickets forwards cursor and pageSize properly"() {
+        given:
+        viewClient.listTicketsForView(50L, "page-cursor", 50) >> Mono.just(new TicketsResponse([], new Meta(), null, 0))
+
+        when:
+        def result = tools.getViewTickets(50L, "page-cursor", 50, false, false)
+
+        then:
+        result instanceof ViewTicketsResult
+        result.returnedCount == 0
     }
 }
 
