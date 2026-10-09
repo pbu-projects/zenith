@@ -16,6 +16,7 @@
 package lol.pbu.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.micronaut.core.annotation.Introspected;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.serde.annotation.Serdeable;
 
@@ -26,6 +27,7 @@ import java.util.Map;
  * Options encapsulating ticket mutation parameters for single ticket and batch ticket update operations.
  * Avoids telescopic parameter lists and provides a clean, extensible builder.
  */
+@Introspected
 @Serdeable
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TicketMutationOptions(
@@ -45,8 +47,32 @@ public record TicketMutationOptions(
         @Nullable List<String> additionalTags,
         @Nullable List<String> removeTags,
         @Nullable List<String> tags,
-        @Nullable String subject
+        @Nullable String subject,
+        @Nullable List<?> emailCcs,
+        @Nullable List<?> followers
 ) {
+
+    public TicketMutationOptions(
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
+            @Nullable List<String> additionalTags,
+            @Nullable List<String> removeTags,
+            @Nullable List<String> tags,
+            @Nullable String subject
+    ) {
+        this(comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, additionalTags, removeTags, tags, subject, null, null);
+    }
 
     public TicketMutationOptions(
             @Nullable String comment,
@@ -66,7 +92,7 @@ public record TicketMutationOptions(
             @Nullable List<String> removeTags,
             @Nullable List<String> tags
     ) {
-        this(comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, additionalTags, removeTags, tags, null);
+        this(comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, additionalTags, removeTags, tags, null, null, null);
     }
 
     public TicketMutationOptions(
@@ -84,7 +110,7 @@ public record TicketMutationOptions(
             @Nullable Long customStatusId,
             @Nullable Long ticketFormId
     ) {
-        this(comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, null, null, null, null);
+        this(comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, null, null, null, null, null, null);
     }
 
     public static Builder builder() {
@@ -109,7 +135,9 @@ public record TicketMutationOptions(
                 .additionalTags(additionalTags)
                 .removeTags(removeTags)
                 .tags(tags)
-                .subject(subject);
+                .subject(subject)
+                .emailCcs(emailCcs)
+                .followers(followers);
     }
 
     public static final class Builder {
@@ -130,6 +158,8 @@ public record TicketMutationOptions(
         private List<String> removeTags;
         private List<String> tags;
         private String subject;
+        private List<?> emailCcs;
+        private List<?> followers;
 
         public Builder comment(@Nullable String comment) {
             this.comment = comment;
@@ -216,6 +246,16 @@ public record TicketMutationOptions(
             return this;
         }
 
+        public Builder emailCcs(@Nullable List<?> emailCcs) {
+            this.emailCcs = emailCcs;
+            return this;
+        }
+
+        public Builder followers(@Nullable List<?> followers) {
+            this.followers = followers;
+            return this;
+        }
+
         public TicketMutationOptions build() {
             return new TicketMutationOptions(
                     comment,
@@ -234,7 +274,9 @@ public record TicketMutationOptions(
                     additionalTags,
                     removeTags,
                     tags,
-                    subject
+                    subject,
+                    emailCcs,
+                    followers
             );
         }
     }

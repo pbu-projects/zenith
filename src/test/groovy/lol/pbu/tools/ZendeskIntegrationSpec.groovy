@@ -614,6 +614,130 @@ class ZendeskIntegrationSpec extends Specification {
         bulkPayload.ticket.subject == "Bulk Wire Subject"
     }
 
+    def "ticket mutation wire payloads contain requester, email_ccs, and followers for issue #86"() {
+        when: "creating a ticket with requesterEmail, emailCcs, and followers"
+        def createdExpress = ticketTools.createTicket(
+                "Express Ticket",
+                "Initial note",
+                true,
+                "normal",
+                "open",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "requester@example.com",
+                ["cc1@example.com", 2002L, [user_id: 3003L, action: "put"]],
+                ["follower@example.com", 4004L],
+                null
+        )
+
+        then:
+        createdExpress != null
+        def createReq = handler.findLastRequest("POST", "/api/v2/tickets")
+        createReq != null
+        def createPayload = new JsonSlurper().parseText(createReq.body)
+        createPayload.ticket.subject == "Express Ticket"
+        createPayload.ticket.requester.email == "requester@example.com"
+        createPayload.ticket.email_ccs.size() == 3
+        createPayload.ticket.email_ccs[0].user_email == "cc1@example.com"
+        createPayload.ticket.email_ccs[0].action == "put"
+        createPayload.ticket.email_ccs[1].user_id == "2002"
+        createPayload.ticket.email_ccs[1].action == "put"
+        createPayload.ticket.email_ccs[2].user_id == "3003"
+        createPayload.ticket.email_ccs[2].action == "put"
+        createPayload.ticket.followers.size() == 2
+        createPayload.ticket.followers[0].user_email == "follower@example.com"
+        createPayload.ticket.followers[0].action == "put"
+        createPayload.ticket.followers[1].user_id == "4004"
+        createPayload.ticket.followers[1].action == "put"
+
+        when: "updating a ticket with emailCcs and followers"
+        def updated = ticketTools.updateTicket(
+                1L,
+                "Update note",
+                "open",
+                "normal",
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Updated CCs Subject",
+                ["cc_update@example.com"],
+                [[user_id: 5005L, action: "delete"]],
+                null
+        )
+
+        then:
+        updated != null
+        def updateReq = handler.findLastRequest("PUT", "/api/v2/tickets/1")
+        updateReq != null
+        def updatePayload = new JsonSlurper().parseText(updateReq.body)
+        updatePayload.ticket.subject == "Updated CCs Subject"
+        updatePayload.ticket.email_ccs.size() == 1
+        updatePayload.ticket.email_ccs[0].user_email == "cc_update@example.com"
+        updatePayload.ticket.email_ccs[0].action == "put"
+        updatePayload.ticket.followers.size() == 1
+        updatePayload.ticket.followers[0].user_id == "5005"
+        updatePayload.ticket.followers[0].action == "delete"
+
+        when: "batch updating tickets with emailCcs and followers via async bulk"
+        def bulk = ticketTools.batchUpdateTickets(
+                [1L],
+                "Bulk note",
+                "open",
+                "normal",
+                true,
+                null,
+                null,
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Bulk CC Subject",
+                ["bulk_cc@example.com"],
+                [6006L],
+                null,
+                null
+        )
+
+        then:
+        bulk != null
+        def bulkReq = handler.findLastRequest("PUT", "/api/v2/tickets/update_many")
+        bulkReq != null
+        def bulkPayload = new JsonSlurper().parseText(bulkReq.body)
+        bulkPayload.ticket.subject == "Bulk CC Subject"
+        bulkPayload.ticket.email_ccs.size() == 1
+        bulkPayload.ticket.email_ccs[0].user_email == "bulk_cc@example.com"
+        bulkPayload.ticket.email_ccs[0].action == "put"
+        bulkPayload.ticket.followers.size() == 1
+        bulkPayload.ticket.followers[0].user_id == "6006"
+        bulkPayload.ticket.followers[0].action == "put"
+    }
+
     def "Ticket forms and ticket fields discovery via embedded HTTP server"() {
         when: "listing ticket forms"
         def formsResp = metadataTools.listTicketForms()

@@ -11,7 +11,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lol.pbu.model.BatchUpdateResponse;
 import lol.pbu.model.BatchUpdateResponse.TicketUpdateResult;
-import lol.pbu.model.TicketCreateInputWithTags;
 import lol.pbu.model.TicketMutationOptions;
 import lol.pbu.model.TicketUpdateInputWithForm;
 import lol.pbu.service.ZendeskMetadataService;
@@ -19,6 +18,8 @@ import lol.pbu.z4j.client.AttachmentClient;
 import lol.pbu.z4j.client.JobStatusClient;
 import lol.pbu.z4j.client.TicketClient;
 import lol.pbu.z4j.model.AttachmentUploadResponse;
+import lol.pbu.z4j.model.EmailCC;
+import lol.pbu.z4j.model.Follower;
 import lol.pbu.z4j.model.JobStatus;
 import lol.pbu.z4j.model.JobStatusResponse;
 import lol.pbu.z4j.model.Ticket;
@@ -32,6 +33,8 @@ import lol.pbu.z4j.model.TicketFieldCustomStatusObject;
 import lol.pbu.z4j.model.TicketFieldResponse;
 import lol.pbu.z4j.model.TicketFieldsResponse;
 import lol.pbu.z4j.model.TicketForm;
+import lol.pbu.z4j.model.TicketInputBase;
+import lol.pbu.z4j.model.TicketRequester;
 import lol.pbu.z4j.model.TicketResponse;
 import lol.pbu.z4j.model.TicketType;
 import lol.pbu.z4j.model.TicketUpdateInput;
@@ -75,6 +78,12 @@ public class ZendeskTicketTools {
     private static final String PARAM_CONVERT_TO_INCIDENT = "convertToIncident";
     private static final String PARAM_CUSTOM_FIELDS = "customFields";
     private static final String PARAM_REQUESTER_ID = "requesterId";
+    private static final String PARAM_REQUESTER_ID_SNAKE = "requester_id";
+    private static final String PARAM_REQUESTER_EMAIL = "requesterEmail";
+    private static final String PARAM_REQUESTER_EMAIL_SNAKE = "requester_email";
+    private static final String PARAM_EMAIL_CCS = "emailCcs";
+    private static final String PARAM_EMAIL_CCS_SNAKE = "email_ccs";
+    private static final String PARAM_FOLLOWERS = "followers";
     private static final String PARAM_TYPE = "type";
     private static final String PARAM_DESCRIPTION = "description";
     private static final String PARAM_CUSTOM_STATUS_ID = "customStatusId";
@@ -340,10 +349,22 @@ public class ZendeskTicketTools {
             @ToolArg(description = "Optional tags to remove from the ticket") @Nullable List<String> removeTags,
             @ToolArg(description = "Optional tags to set on the ticket. WARNING: Destructive — replaces all existing tags on the ticket with this set.") @Nullable List<String> tags,
             @ToolArg(description = "Optional ID of the parent problem ticket to link this incident to (automatically sets ticket type to incident)") @Nullable Long problemId,
+            @ToolArg(description = "Optional requester email address to create or match an end-user as requester. Mutually exclusive with requesterId.") @Nullable String requesterEmail,
+            @ToolArg(description = "Optional email CCs as user IDs, email addresses, or objects with user_id/user_email") @Nullable List<?> emailCcs,
+            @ToolArg(description = "Optional followers as user IDs, email addresses, or objects with user_id/user_email") @Nullable List<?> followers,
             CallToolRequest request
     ) {
         log.info("MCP Tool called: createTicket(subject='{}')", subject);
-        validateKnownParameters(request, "createTicket", PARAM_SUBJECT, PARAM_COMMENT, PARAM_IS_PUBLIC, PARAM_PRIORITY, PARAM_STATUS, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_DESCRIPTION, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_PROBLEM_ID);
+        validateKnownParameters(request, "createTicket", PARAM_SUBJECT, PARAM_COMMENT, PARAM_IS_PUBLIC, PARAM_PRIORITY, PARAM_STATUS, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_REQUESTER_ID_SNAKE, PARAM_REQUESTER_EMAIL, PARAM_REQUESTER_EMAIL_SNAKE, PARAM_EMAIL_CCS, PARAM_EMAIL_CCS_SNAKE, PARAM_FOLLOWERS, PARAM_TYPE, PARAM_DESCRIPTION, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_PROBLEM_ID);
+
+        final Long resolvedRequesterId = ToolValidationSupport.resolveRequesterId(requesterId, request);
+        final String resolvedRequesterEmail = ToolValidationSupport.resolveRequesterEmail(requesterEmail, request);
+        if (resolvedRequesterId != null && resolvedRequesterEmail != null) {
+            throw new IllegalArgumentException("Cannot specify both 'requesterId' and 'requesterEmail'. Provide either requesterId or requesterEmail, not both.");
+        }
+        if (resolvedRequesterId != null && resolvedRequesterId <= 0) {
+            throw new IllegalArgumentException("requesterId must be a positive integer, got: " + resolvedRequesterId);
+        }
 
         final Long resolvedProblemId = resolveProblemId(problemId, request);
         validateProblemTypeConflict(resolvedProblemId, type);
@@ -352,21 +373,25 @@ public class ZendeskTicketTools {
         final List<String> resolvedRemoveTags = ToolValidationSupport.resolveAndValidateTags(removeTags, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, request);
         final List<String> resolvedTags = ToolValidationSupport.resolveAndValidateTags(tags, PARAM_TAGS, null, request);
 
+        final List<EmailCC> resolvedEmailCcs = ToolValidationSupport.resolveAndValidateEmailCcs(emailCcs, request);
+        final List<Follower> resolvedFollowers = ToolValidationSupport.resolveAndValidateFollowers(followers, request);
+
         String initialComment = resolveInitialComment(comment, request);
         return validateProblemTarget(resolvedProblemId)
                 .then(resolveUploadTokens(uploadTokens, attachmentFilePaths))
                 .flatMap(tokens -> {
-                    TicketCreateInputWithTags input = buildTicketCreateInput(
+                    TicketCreateInput input = buildTicketCreateInput(
                             subject, initialComment, isPublic, tokens,
-                            priority, status, customFields, requesterId, type,
+                            priority, status, customFields, resolvedRequesterId, resolvedRequesterEmail, type,
                             resolvedProblemId, ticketFormId, customStatusId,
-                            resolvedTags, resolvedAdditionalTags, resolvedRemoveTags, request
+                            resolvedTags, resolvedAdditionalTags, resolvedRemoveTags,
+                            resolvedEmailCcs, resolvedFollowers, request
                     );
                     return ticketClient.createTicket(new TicketCreateRequest(input));
                 });
     }
 
-    private TicketCreateInputWithTags buildTicketCreateInput(
+    private TicketCreateInput buildTicketCreateInput(
             String subject,
             String initialComment,
             Boolean isPublic,
@@ -375,6 +400,7 @@ public class ZendeskTicketTools {
             @Nullable String status,
             @Nullable List<Map<String, Object>> customFields,
             @Nullable Long requesterId,
+            @Nullable String requesterEmail,
             @Nullable String type,
             @Nullable Long resolvedProblemId,
             @Nullable Long ticketFormId,
@@ -382,6 +408,8 @@ public class ZendeskTicketTools {
             @Nullable List<String> resolvedTags,
             @Nullable List<String> resolvedAdditionalTags,
             @Nullable List<String> resolvedRemoveTags,
+            @Nullable List<EmailCC> resolvedEmailCcs,
+            @Nullable List<Follower> resolvedFollowers,
             @Nullable CallToolRequest request
     ) {
         validateCreateTicketInput(subject, initialComment, isPublic, tokens);
@@ -391,7 +419,7 @@ public class ZendeskTicketTools {
         if (!tokens.isEmpty()) {
             ticketComment.setUploads(tokens);
         }
-        TicketCreateInputWithTags input = new TicketCreateInputWithTags(ticketComment);
+        TicketCreateInput input = new TicketCreateInput(ticketComment);
         input.setSubject(subject);
         input.setRawSubject(subject);
 
@@ -400,7 +428,8 @@ public class ZendeskTicketTools {
         if (!parsedCustomFields.isEmpty()) {
             input.setCustomFields(parsedCustomFields);
         }
-        applyRequesterAndType(input, requesterId, type);
+        applyRequester(input, requesterId, requesterEmail);
+        applyType(input, type);
         applyProblemLink(input, resolvedProblemId);
 
         final Long resolvedTicketFormId = resolveTicketFormId(ticketFormId, request);
@@ -412,6 +441,7 @@ public class ZendeskTicketTools {
         }
 
         applyCreateTags(input, resolvedTags, resolvedAdditionalTags, resolvedRemoveTags);
+        applyEmailCcsAndFollowers(input, resolvedEmailCcs, resolvedFollowers);
         return input;
     }
 
@@ -422,7 +452,7 @@ public class ZendeskTicketTools {
         }
     }
 
-    private void applyTicketForm(TicketCreateInputWithTags input, @Nullable Long resolvedTicketFormId) {
+    private void applyTicketForm(TicketCreateInput input, @Nullable Long resolvedTicketFormId) {
         if (resolvedTicketFormId != null) {
             validateTicketFormBounds(resolvedTicketFormId);
             validateTicketForm(resolvedTicketFormId);
@@ -430,7 +460,7 @@ public class ZendeskTicketTools {
         }
     }
 
-    private void applyCreateTags(TicketCreateInputWithTags input, @Nullable List<String> tags, @Nullable List<String> additionalTags, @Nullable List<String> removeTags) {
+    private void applyCreateTags(TicketCreateInput input, @Nullable List<String> tags, @Nullable List<String> additionalTags, @Nullable List<String> removeTags) {
         if (tags != null) {
             input.setTags(tags);
         }
@@ -440,6 +470,37 @@ public class ZendeskTicketTools {
         if (removeTags != null) {
             input.setRemoveTags(removeTags);
         }
+    }
+
+    private void applyEmailCcsAndFollowers(TicketInputBase<?> input, @Nullable List<EmailCC> emailCcs, @Nullable List<Follower> followers) {
+        if (emailCcs != null) {
+            input.setEmailCcs(emailCcs);
+        }
+        if (followers != null) {
+            input.setFollowers(followers);
+        }
+    }
+
+    public Mono<TicketResponse> createTicket(
+            String subject,
+            @Nullable String comment,
+            Boolean isPublic,
+            @Nullable String priority,
+            @Nullable String status,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
+            @Nullable List<String> additionalTags,
+            @Nullable List<String> removeTags,
+            @Nullable List<String> tags,
+            @Nullable Long problemId,
+            CallToolRequest request
+    ) {
+        return createTicket(subject, comment, isPublic, priority, status, uploadTokens, attachmentFilePaths, customFields, requesterId, type, customStatusId, ticketFormId, additionalTags, removeTags, tags, problemId, null, null, null, request);
     }
 
     public Mono<TicketResponse> createTicket(
@@ -509,13 +570,22 @@ public class ZendeskTicketTools {
         }
     }
 
-    private void applyRequesterAndType(TicketCreateInput input, @Nullable Long requesterId, @Nullable String type) {
+    private void applyRequester(TicketCreateInput input, @Nullable Long requesterId, @Nullable String requesterEmail) {
+        if (requesterId != null && requesterEmail != null && !requesterEmail.isBlank()) {
+            throw new IllegalArgumentException("Cannot specify both 'requesterId' and 'requesterEmail'. Provide either requesterId or requesterEmail, not both.");
+        }
         if (requesterId != null) {
             if (requesterId <= 0) {
                 throw new IllegalArgumentException("requesterId must be a positive integer, got: " + requesterId);
             }
             input.setRequesterId(requesterId);
+        } else if (requesterEmail != null) {
+            String validatedEmail = ToolValidationSupport.validateEmail(requesterEmail, PARAM_REQUESTER_EMAIL);
+            input.setRequester(new TicketRequester(validatedEmail));
         }
+    }
+
+    private void applyType(TicketCreateInput input, @Nullable String type) {
         if (type != null && !type.isBlank()) {
             if (type.trim().equalsIgnoreCase("none") || type.trim().isEmpty()) {
                 input.setType(null);
@@ -720,7 +790,9 @@ public class ZendeskTicketTools {
             List<String> additionalTags,
             List<String> removeTags,
             List<String> tags,
-            @Nullable String subject
+            @Nullable String subject,
+            @Nullable List<EmailCC> emailCcs,
+            @Nullable List<Follower> followers
     ) {
         TicketUpdateInputWithForm input = new TicketUpdateInputWithForm();
         applyUpdateTagsAndForm(input, ticketFormId, additionalTags, removeTags, tags);
@@ -728,11 +800,32 @@ public class ZendeskTicketTools {
         applyUpdateSubject(input, subject);
         applyUpdateRequesterId(input, requesterId);
         applyUpdateType(input, type, convertToIncident);
+        applyEmailCcsAndFollowers(input, emailCcs, followers);
 
         if (customStatusId != null) {
             input.setCustomStatusId(customStatusId);
         }
         return input;
+    }
+
+    TicketUpdateInput buildTicketUpdateInput(
+            String comment,
+            String status,
+            String priority,
+            Boolean isPublic,
+            List<String> tokens,
+            List<TicketCustomField> customFields,
+            Long requesterId,
+            String type,
+            Boolean convertToIncident,
+            Long customStatusId,
+            Long ticketFormId,
+            List<String> additionalTags,
+            List<String> removeTags,
+            List<String> tags,
+            @Nullable String subject
+    ) {
+        return buildTicketUpdateInput(comment, status, priority, isPublic, tokens, customFields, requesterId, type, convertToIncident, customStatusId, ticketFormId, additionalTags, removeTags, tags, subject, null, null);
     }
 
     private void applyUpdateTagsAndForm(TicketUpdateInputWithForm input, @Nullable Long ticketFormId, @Nullable List<String> additionalTags, @Nullable List<String> removeTags, @Nullable List<String> tags) {
@@ -915,6 +1008,8 @@ public class ZendeskTicketTools {
             @ToolArg(description = "Optional tags to remove from the ticket") @Nullable List<String> removeTags,
             @ToolArg(description = "Optional tags to set on the ticket. WARNING: Destructive — replaces all existing tags on the ticket with this set.") @Nullable List<String> tags,
             @ToolArg(description = "Optional updated subject line for the ticket") @Nullable String subject,
+            @ToolArg(description = "Optional email CCs as user IDs, email addresses, or objects with user_id/user_email") @Nullable List<?> emailCcs,
+            @ToolArg(description = "Optional followers as user IDs, email addresses, or objects with user_id/user_email") @Nullable List<?> followers,
             CallToolRequest request
     ) {
         TicketMutationOptions options = TicketMutationOptions.builder()
@@ -935,8 +1030,34 @@ public class ZendeskTicketTools {
                 .removeTags(removeTags)
                 .tags(tags)
                 .subject(subject)
+                .emailCcs(emailCcs)
+                .followers(followers)
                 .build();
         return updateTicket(ticketId, options, request);
+    }
+
+    public Mono<TicketUpdateResponse> updateTicket(
+            Long ticketId,
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
+            @Nullable List<String> additionalTags,
+            @Nullable List<String> removeTags,
+            @Nullable List<String> tags,
+            @Nullable String subject,
+            CallToolRequest request
+    ) {
+        return updateTicket(ticketId, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, additionalTags, removeTags, tags, subject, null, null, request);
     }
 
     public Mono<TicketUpdateResponse> updateTicket(
@@ -989,7 +1110,9 @@ public class ZendeskTicketTools {
             @Nullable TicketFieldCustomStatusObject validatedCustomStatus,
             boolean isTypeUnset,
             @Nullable TicketUpdateInputType parsedType,
-            List<TicketCustomField> parsedCustomFields
+            List<TicketCustomField> parsedCustomFields,
+            @Nullable List<EmailCC> resolvedEmailCcs,
+            @Nullable List<Follower> resolvedFollowers
     ) {}
 
     private PreparedTicketMutation prepareTicketMutation(TicketMutationOptions opt, @Nullable CallToolRequest request) {
@@ -1004,11 +1127,16 @@ public class ZendeskTicketTools {
         final List<String> resolvedRemoveTags = ToolValidationSupport.resolveAndValidateTags(opt.removeTags(), PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, request);
         final List<String> resolvedTags = ToolValidationSupport.resolveAndValidateTags(opt.tags(), PARAM_TAGS, null, request);
 
+        final List<EmailCC> resolvedEmailCcs = ToolValidationSupport.resolveAndValidateEmailCcs(opt.emailCcs(), request);
+        final List<Follower> resolvedFollowers = ToolValidationSupport.resolveAndValidateFollowers(opt.followers(), request);
+
         TicketMutationOptions resolvedOpt = opt.toBuilder()
                 .subject(resolvedSubject)
                 .additionalTags(resolvedAdditionalTags)
                 .removeTags(resolvedRemoveTags)
                 .tags(resolvedTags)
+                .emailCcs(resolvedEmailCcs)
+                .followers(resolvedFollowers)
                 .build();
 
         final Long resolvedTicketFormId = resolveAndValidateTicketFormId(resolvedOpt.ticketFormId(), request);
@@ -1019,7 +1147,7 @@ public class ZendeskTicketTools {
         final TicketUpdateInputType parsedType = (resolvedOpt.type() != null && !isTypeUnset) ? parseTicketType(resolvedOpt.type()) : null;
         List<TicketCustomField> parsedCustomFields = parseCustomFields(resolvedOpt.customFields());
 
-        return new PreparedTicketMutation(resolvedOpt, resolvedTicketFormId, resolvedCustomStatusId, validatedCustomStatus, isTypeUnset, parsedType, parsedCustomFields);
+        return new PreparedTicketMutation(resolvedOpt, resolvedTicketFormId, resolvedCustomStatusId, validatedCustomStatus, isTypeUnset, parsedType, parsedCustomFields, resolvedEmailCcs, resolvedFollowers);
     }
 
     public Mono<TicketUpdateResponse> updateTicket(
@@ -1029,14 +1157,14 @@ public class ZendeskTicketTools {
     ) {
         TicketMutationOptions opt = options != null ? options : TicketMutationOptions.builder().build();
         log.info("MCP Tool called: updateTicket(id={})", ticketId);
-        validateKnownParameters(request, "updateTicket", "ticketId", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_SUBJECT);
+        validateKnownParameters(request, "updateTicket", "ticketId", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_REQUESTER_ID_SNAKE, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_SUBJECT, PARAM_EMAIL_CCS, PARAM_EMAIL_CCS_SNAKE, PARAM_FOLLOWERS);
 
         PreparedTicketMutation prep = prepareTicketMutation(opt, request);
 
         return validateProblemTarget(prep.resolvedOptions().problemId())
                 .then(resolveUploadTokens(prep.resolvedOptions().uploadTokens(), prep.resolvedOptions().attachmentFilePaths()))
                 .flatMap(tokens -> {
-                    TicketUpdateInput input = buildTicketUpdateInput(prep.resolvedOptions().comment(), prep.resolvedOptions().status(), prep.resolvedOptions().priority(), prep.resolvedOptions().isPublic(), tokens, prep.parsedCustomFields(), prep.resolvedOptions().requesterId(), prep.resolvedOptions().type(), prep.resolvedOptions().convertToIncident(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.resolvedOptions().additionalTags(), prep.resolvedOptions().removeTags(), prep.resolvedOptions().tags(), prep.resolvedOptions().subject());
+                    TicketUpdateInput input = buildTicketUpdateInput(prep.resolvedOptions().comment(), prep.resolvedOptions().status(), prep.resolvedOptions().priority(), prep.resolvedOptions().isPublic(), tokens, prep.parsedCustomFields(), prep.resolvedOptions().requesterId(), prep.resolvedOptions().type(), prep.resolvedOptions().convertToIncident(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.resolvedOptions().additionalTags(), prep.resolvedOptions().removeTags(), prep.resolvedOptions().tags(), prep.resolvedOptions().subject(), prep.resolvedEmailCcs(), prep.resolvedFollowers());
                     return resolveTicketUpdateInput(ticketId, prep.resolvedOptions(), input, prep.parsedType(), prep.isTypeUnset(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus())
                             .flatMap(resolvedInput -> ticketClient.updateTicket(ticketId, new TicketUpdateRequest(resolvedInput)));
                 });
@@ -1417,6 +1545,8 @@ public class ZendeskTicketTools {
             @ToolArg(description = "Optional tags to remove from the tickets") @Nullable List<String> removeTags,
             @ToolArg(description = "Optional tags to set on the tickets. WARNING: Destructive — replaces all existing tags on the tickets with this set.") @Nullable List<String> tags,
             @ToolArg(description = "Optional updated subject line for the tickets") @Nullable String subject,
+            @ToolArg(description = "Optional email CCs as user IDs, email addresses, or objects with user_id/user_email") @Nullable List<?> emailCcs,
+            @ToolArg(description = "Optional followers as user IDs, email addresses, or objects with user_id/user_email") @Nullable List<?> followers,
             @ToolArg(description = "Optional batch chunk size (max 100). Defaults to 100 or ZENDESK_BATCH_SIZE.") @Nullable Integer chunkSize,
             CallToolRequest request
     ) {
@@ -1438,8 +1568,36 @@ public class ZendeskTicketTools {
                 .removeTags(removeTags)
                 .tags(tags)
                 .subject(subject)
+                .emailCcs(emailCcs)
+                .followers(followers)
                 .build();
         return batchUpdateTickets(ticketIds, options, asyncBulk, chunkSize, request);
+    }
+
+    public Mono<BatchUpdateResponse> batchUpdateTickets(
+            List<Long> ticketIds,
+            @Nullable String comment,
+            @Nullable String status,
+            @Nullable String priority,
+            @Nullable Boolean isPublic,
+            @Nullable List<String> uploadTokens,
+            @Nullable List<String> attachmentFilePaths,
+            @Nullable Boolean asyncBulk,
+            @Nullable Long problemId,
+            @Nullable Boolean convertToIncident,
+            @Nullable List<Map<String, Object>> customFields,
+            @Nullable Long requesterId,
+            @Nullable String type,
+            @Nullable Long customStatusId,
+            @Nullable Long ticketFormId,
+            @Nullable List<String> additionalTags,
+            @Nullable List<String> removeTags,
+            @Nullable List<String> tags,
+            @Nullable String subject,
+            @Nullable Integer chunkSize,
+            CallToolRequest request
+    ) {
+        return batchUpdateTickets(ticketIds, comment, status, priority, isPublic, uploadTokens, attachmentFilePaths, asyncBulk, problemId, convertToIncident, customFields, requesterId, type, customStatusId, ticketFormId, additionalTags, removeTags, tags, subject, null, null, chunkSize, request);
     }
 
     public Mono<BatchUpdateResponse> batchUpdateTickets(
@@ -1530,7 +1688,7 @@ public class ZendeskTicketTools {
     ) {
         TicketMutationOptions opt = options != null ? options : TicketMutationOptions.builder().build();
         log.info("MCP Tool called: batchUpdateTickets(ids={}, asyncBulk={}, chunkSize={})", ticketIds, asyncBulk, chunkSize);
-        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, "asyncBulk", PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_SUBJECT, PARAM_CHUNK_SIZE, PARAM_CHUNK_SIZE_SNAKE, PARAM_BATCH_SIZE, PARAM_BATCH_SIZE_SNAKE);
+        validateKnownParameters(request, "batchUpdateTickets", "ticketIds", PARAM_COMMENT, PARAM_STATUS, PARAM_PRIORITY, PARAM_IS_PUBLIC, PARAM_UPLOAD_TOKENS, PARAM_ATTACHMENT_FILE_PATHS, "asyncBulk", PARAM_PROBLEM_ID, PARAM_CONVERT_TO_INCIDENT, PARAM_CUSTOM_FIELDS, PARAM_REQUESTER_ID, PARAM_REQUESTER_ID_SNAKE, PARAM_TYPE, PARAM_CUSTOM_STATUS_ID, PARAM_CUSTOM_STATUS_ID_SNAKE, PARAM_TICKET_FORM_ID, PARAM_TICKET_FORM_ID_SNAKE, PARAM_ADDITIONAL_TAGS, PARAM_ADDITIONAL_TAGS_SNAKE, PARAM_REMOVE_TAGS, PARAM_REMOVE_TAGS_SNAKE, PARAM_TAGS, PARAM_SUBJECT, PARAM_CHUNK_SIZE, PARAM_CHUNK_SIZE_SNAKE, PARAM_BATCH_SIZE, PARAM_BATCH_SIZE_SNAKE, PARAM_EMAIL_CCS, PARAM_EMAIL_CCS_SNAKE, PARAM_FOLLOWERS);
         List<Long> distinctIds = parseDistinctTicketIds(ticketIds);
         if (distinctIds.isEmpty()) {
             return Mono.just(new BatchUpdateResponse(null, null, Collections.emptyList()));
@@ -1543,9 +1701,9 @@ public class ZendeskTicketTools {
                 .then(resolveUploadTokens(prep.resolvedOptions().uploadTokens(), prep.resolvedOptions().attachmentFilePaths()))
                 .flatMap(tokens -> {
                     if (!Boolean.FALSE.equals(asyncBulk)) {
-                        return executeAsyncBulkBatchUpdate(distinctIds, resolvedChunkSize, prep.resolvedOptions(), tokens, prep.parsedCustomFields(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus(), prep.parsedType(), prep.isTypeUnset());
+                        return executeAsyncBulkBatchUpdate(distinctIds, resolvedChunkSize, prep.resolvedOptions(), tokens, prep.parsedCustomFields(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus(), prep.parsedType(), prep.isTypeUnset(), prep.resolvedEmailCcs(), prep.resolvedFollowers());
                     }
-                    return executeConcurrentBatchUpdate(distinctIds, prep.resolvedOptions(), tokens, prep.parsedCustomFields(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus(), prep.parsedType(), prep.isTypeUnset());
+                    return executeConcurrentBatchUpdate(distinctIds, prep.resolvedOptions(), tokens, prep.parsedCustomFields(), prep.resolvedCustomStatusId(), prep.resolvedTicketFormId(), prep.validatedCustomStatus(), prep.parsedType(), prep.isTypeUnset(), prep.resolvedEmailCcs(), prep.resolvedFollowers());
                 });
     }
 
@@ -1559,11 +1717,13 @@ public class ZendeskTicketTools {
             @Nullable Long resolvedTicketFormId,
             @Nullable TicketFieldCustomStatusObject validatedCustomStatus,
             @Nullable TicketUpdateInputType parsedType,
-            boolean isTypeUnset
+            boolean isTypeUnset,
+            @Nullable List<EmailCC> resolvedEmailCcs,
+            @Nullable List<Follower> resolvedFollowers
     ) {
         return validateCurrentTicketsForBulkAsync(distinctIds, chunkSize, options, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus, parsedType, isTypeUnset)
                 .then(Mono.defer(() -> {
-                    TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId, options.additionalTags(), options.removeTags(), options.tags(), options.subject());
+                    TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId, options.additionalTags(), options.removeTags(), options.tags(), options.subject(), resolvedEmailCcs, resolvedFollowers);
                     if (options.problemId() != null) {
                         input.setProblemId(options.problemId());
                         input.setType(TicketUpdateInputType.INCIDENT);
@@ -1605,8 +1765,8 @@ public class ZendeskTicketTools {
         }
         if (multiMono != null) {
             return multiMono
-                    .filter(resp -> resp != null && resp.getTickets() != null)
-                    .flatMapMany(resp -> Flux.fromIterable(resp.getTickets()));
+                .filter(resp -> resp != null && resp.getTickets() != null)
+                .flatMapMany(resp -> Flux.fromIterable(resp.getTickets()));
         }
         return fallbackFetchTicketsForValidation(chunk);
     }
@@ -1649,11 +1809,13 @@ public class ZendeskTicketTools {
             @Nullable Long resolvedTicketFormId,
             @Nullable TicketFieldCustomStatusObject validatedCustomStatus,
             @Nullable TicketUpdateInputType parsedType,
-            boolean isTypeUnset
+            boolean isTypeUnset,
+            @Nullable List<EmailCC> resolvedEmailCcs,
+            @Nullable List<Follower> resolvedFollowers
     ) {
         return Flux.fromIterable(distinctIds)
                 .flatMapSequential(id -> {
-                    TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId, options.additionalTags(), options.removeTags(), options.tags(), options.subject());
+                    TicketUpdateInput input = buildTicketUpdateInput(options.comment(), options.status(), options.priority(), options.isPublic(), tokens, parsedCustomFields, options.requesterId(), options.type(), options.convertToIncident(), resolvedCustomStatusId, resolvedTicketFormId, options.additionalTags(), options.removeTags(), options.tags(), options.subject(), resolvedEmailCcs, resolvedFollowers);
                     return resolveTicketUpdateInput(id, options, input, parsedType, isTypeUnset, resolvedCustomStatusId, resolvedTicketFormId, validatedCustomStatus)
                             .flatMap(resolvedInput -> ticketClient.updateTicket(id, new TicketUpdateRequest(resolvedInput)))
                             .map(resp -> new TicketUpdateResult(id, true, resp != null ? resp.getTicket() : null, null))

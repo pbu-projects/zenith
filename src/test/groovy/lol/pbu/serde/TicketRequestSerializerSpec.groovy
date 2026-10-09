@@ -18,11 +18,14 @@ package lol.pbu.serde
 import io.micronaut.serde.ObjectMapper
 import io.micronaut.test.extensions.spock.annotation.MicronautTest
 import jakarta.inject.Inject
-import lol.pbu.model.TicketCreateInputWithTags
 import lol.pbu.model.TicketUpdateInputWithForm
+import lol.pbu.z4j.model.EmailCC
+import lol.pbu.z4j.model.EmailCCAllOfAction
+import lol.pbu.z4j.model.Follower
 import lol.pbu.z4j.model.TicketComment
 import lol.pbu.z4j.model.TicketCreateInput
 import lol.pbu.z4j.model.TicketCreateRequest
+import lol.pbu.z4j.model.TicketRequester
 import lol.pbu.z4j.model.TicketUpdateInput
 import lol.pbu.z4j.model.TicketUpdateRequest
 import spock.lang.Specification
@@ -47,9 +50,9 @@ class TicketRequestSerializerSpec extends Specification {
         map.isEmpty()
     }
 
-    def "TicketCreateRequestSerializer serializes polymorphic TicketCreateInputWithTags preserving tags"() {
+    def "TicketCreateRequestSerializer serializes TicketCreateInput preserving tags"() {
         given:
-        def input = new TicketCreateInputWithTags(new TicketComment().tap { body = "Hello" }).tap {
+        def input = new TicketCreateInput(new TicketComment().tap { body = "Hello" }).tap {
             subject = "Issue title"
             additionalTags = ["tag_a", "tag_b"]
             removeTags = ["tag_c"]
@@ -66,6 +69,32 @@ class TicketRequestSerializerSpec extends Specification {
         ticketMap.subject == "Issue title"
         ticketMap.additional_tags == ["tag_a", "tag_b"]
         ticketMap.remove_tags == ["tag_c"]
+    }
+
+    def "TicketCreateRequestSerializer serializes TicketCreateInput with requester, email_ccs, and followers"() {
+        given:
+        def input = new TicketCreateInput(new TicketComment().tap { body = "Hello" }).tap {
+            subject = "Issue title"
+            requester = new TicketRequester("user@example.com")
+            emailCcs = [new EmailCC(EmailCCAllOfAction.PUT, "cc@example.com", null, null)]
+            followers = [new Follower(EmailCCAllOfAction.PUT, null, "12345")]
+        }
+        def request = new TicketCreateRequest(input)
+
+        when:
+        def json = objectMapper.writeValueAsString(request)
+        Map<String, Object> map = objectMapper.readValue(json, Map)
+
+        then:
+        map.containsKey("ticket")
+        def ticketMap = (Map<String, Object>) map.ticket
+        ticketMap.subject == "Issue title"
+        ticketMap.requester instanceof Map
+        ((Map) ticketMap.requester).email == "user@example.com"
+        ticketMap.email_ccs instanceof List
+        ((Map) ((List) ticketMap.email_ccs)[0]).user_email == "cc@example.com"
+        ticketMap.followers instanceof List
+        ((Map) ((List) ticketMap.followers)[0]).user_id == "12345"
     }
 
     def "TicketCreateRequestSerializer serializes standard TicketCreateInput"() {
