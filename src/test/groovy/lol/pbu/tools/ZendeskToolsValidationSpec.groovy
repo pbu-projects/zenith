@@ -30,10 +30,14 @@ import lol.pbu.z4j.model.LocaleAbbreviation
 import lol.pbu.z4j.model.SortArticleBy
 import lol.pbu.z4j.model.SortOrder
 import lol.pbu.model.LeanTicket
-import lol.pbu.model.TicketCreateInputWithTags
 import lol.pbu.model.TicketMutationOptions
 import lol.pbu.model.TicketUpdateInputWithForm
 import lol.pbu.model.ViewTicketsResult
+import lol.pbu.z4j.model.TicketCreateInput
+import lol.pbu.z4j.model.TicketRequester
+import lol.pbu.z4j.model.EmailCC
+import lol.pbu.z4j.model.EmailCCAllOfAction
+import lol.pbu.z4j.model.Follower
 import lol.pbu.service.ZendeskMetadataService
 import lol.pbu.z4j.model.Meta
 import lol.pbu.z4j.model.TicketCustomField
@@ -3621,8 +3625,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         capturedReq != null
-        capturedReq.ticket instanceof TicketCreateInputWithTags
-        def tagInput = (TicketCreateInputWithTags) capturedReq.ticket
+        capturedReq.ticket instanceof TicketCreateInput
+        def tagInput = (TicketCreateInput) capturedReq.ticket
         tagInput.additionalTags == ["add1", "add2"]
         tagInput.removeTags == ["rem1"]
         tagInput.tags == ["base1", "base2"]
@@ -3640,8 +3644,8 @@ class ZendeskToolsValidationSpec extends Specification {
 
         then:
         capturedReq != null
-        capturedReq.ticket instanceof TicketCreateInputWithTags
-        def snakeTagInput = (TicketCreateInputWithTags) capturedReq.ticket
+        capturedReq.ticket instanceof TicketCreateInput
+        def snakeTagInput = (TicketCreateInput) capturedReq.ticket
         snakeTagInput.additionalTags == ["snake_add"]
         snakeTagInput.removeTags == ["snake_rem"]
         snakeTagInput.tags == ["snake_tags"]
@@ -3802,6 +3806,303 @@ class ZendeskToolsValidationSpec extends Specification {
         modified.additionalTags() == ["new_add"]
         modified.removeTags() == ["orig_rem"]
         modified.tags() == ["orig_tag"]
+        modified.comment() == "Original"
+    }
+
+    def "createTicket applies requesterEmail and creates TicketRequester"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketResponse())
+        }
+
+        when: "calling createTicket with explicit requesterEmail"
+        tools.createTicket(
+                "Subject", "Comment", true, null, null, null, null,
+                null, null, null, null, null, null, null, null, null,
+                "express@example.com", null, null, null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket instanceof TicketCreateInput
+        capturedReq.ticket.requester != null
+        capturedReq.ticket.requester.email() == "express@example.com"
+        capturedReq.ticket.requesterId == null
+
+        when: "calling createTicket with requester_email in CallToolRequest arguments"
+        capturedReq = null
+        def req = new CallToolRequest("createTicket", [
+                subject: "Snake Subject",
+                comment: "Snake Comment",
+                requester_email: "snake_requester@example.com"
+        ])
+        tools.createTicket("Snake Subject", "Snake Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, req)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket instanceof TicketCreateInput
+        capturedReq.ticket.requester != null
+        capturedReq.ticket.requester.email() == "snake_requester@example.com"
+        capturedReq.ticket.requesterId == null
+    }
+
+    def "createTicket validates requesterEmail and enforces mutual exclusion with requesterId"() {
+        when: "both requesterId and requesterEmail are provided explicitly"
+        tools.createTicket(
+                "Subject", "Comment", true, null, null, null, null,
+                null, 12345L, null, null, null, null, null, null, null,
+                "both@example.com", null, null, null
+        )
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Cannot specify both 'requesterId' and 'requesterEmail'")
+
+        when: "requester_id and requester_email provided in CallToolRequest arguments"
+        def reqBoth = new CallToolRequest("createTicket", [
+                subject: "Subj",
+                comment: "Comm",
+                requester_id: 12345L,
+                requester_email: "both@example.com"
+        ])
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, reqBoth)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("Cannot specify both 'requesterId' and 'requesterEmail'")
+
+        when: "requesterEmail has invalid email format"
+        tools.createTicket(
+                "Subject", "Comment", true, null, null, null, null,
+                null, null, null, null, null, null, null, null, null,
+                "not-an-email", null, null, null
+        )
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("requesterEmail must be a valid email address, got: 'not-an-email'")
+    }
+
+    def "createTicket applies emailCcs and followers with polymorphic items and action"() {
+        given:
+        TicketCreateRequest capturedReq = null
+        ticketClient.createTicket(_ as TicketCreateRequest) >> { TicketCreateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketResponse())
+        }
+
+        when: "calling createTicket with explicit emailCcs and followers containing IDs, emails, and maps"
+        def ccs = [
+                111L,
+                "cc@example.com",
+                [user_id: 222L, action: "put"],
+                [user_email: "delete_cc@example.com", action: "delete"]
+        ]
+        def flws = [
+                333L,
+                "follower@example.com",
+                [user_id: 444L, action: "put"]
+        ]
+        tools.createTicket(
+                "Subject", "Comment", true, null, null, null, null,
+                null, null, null, null, null, null, null, null, null,
+                null, ccs, flws, null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.emailCcs.size() == 4
+        capturedReq.ticket.emailCcs[0].userId == "111"
+        capturedReq.ticket.emailCcs[0].action == EmailCCAllOfAction.PUT
+        capturedReq.ticket.emailCcs[1].userEmail == "cc@example.com"
+        capturedReq.ticket.emailCcs[1].action == EmailCCAllOfAction.PUT
+        capturedReq.ticket.emailCcs[2].userId == "222"
+        capturedReq.ticket.emailCcs[2].action == EmailCCAllOfAction.PUT
+        capturedReq.ticket.emailCcs[3].userEmail == "delete_cc@example.com"
+        capturedReq.ticket.emailCcs[3].action == EmailCCAllOfAction.DELETE
+
+        capturedReq.ticket.followers.size() == 3
+        capturedReq.ticket.followers[0].userId == "333"
+        capturedReq.ticket.followers[0].action == EmailCCAllOfAction.PUT
+        capturedReq.ticket.followers[1].userEmail == "follower@example.com"
+        capturedReq.ticket.followers[1].action == EmailCCAllOfAction.PUT
+        capturedReq.ticket.followers[2].userId == "444"
+        capturedReq.ticket.followers[2].action == EmailCCAllOfAction.PUT
+
+        when: "calling createTicket with snake_case email_ccs in CallToolRequest"
+        capturedReq = null
+        def req = new CallToolRequest("createTicket", [
+                subject: "Snake CC",
+                comment: "Snake Comment",
+                email_ccs: ["snake_cc@example.com"],
+                followers: [555L]
+        ])
+        tools.createTicket("Snake CC", "Snake Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, req)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.emailCcs.size() == 1
+        capturedReq.ticket.emailCcs[0].userEmail == "snake_cc@example.com"
+        capturedReq.ticket.followers.size() == 1
+        capturedReq.ticket.followers[0].userId == "555"
+    }
+
+    def "updateTicket applies emailCcs and followers"() {
+        given:
+        TicketUpdateRequest capturedReq = null
+        ticketClient.updateTicket(200L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedReq = req
+            Mono.just(new TicketUpdateResponse())
+        }
+
+        when: "calling updateTicket with explicit emailCcs and followers"
+        tools.updateTicket(
+                200L, "Update Comment", null, null, true, null, null,
+                null, null, null, null, null, null, null, null, null, null, null,
+                ["update_cc@example.com"], [777L], null
+        )
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.emailCcs.size() == 1
+        capturedReq.ticket.emailCcs[0].userEmail == "update_cc@example.com"
+        capturedReq.ticket.followers.size() == 1
+        capturedReq.ticket.followers[0].userId == "777"
+
+        when: "calling updateTicket with snake_case email_ccs in CallToolRequest"
+        capturedReq = null
+        def req = new CallToolRequest("updateTicket", [
+                email_ccs: ["update_snake_cc@example.com"]
+        ])
+        tools.updateTicket(200L, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, req)
+
+        then:
+        capturedReq != null
+        capturedReq.ticket.emailCcs.size() == 1
+        capturedReq.ticket.emailCcs[0].userEmail == "update_snake_cc@example.com"
+    }
+
+    def "batchUpdateTickets applies emailCcs and followers in concurrent and bulk modes"() {
+        given:
+        TicketUpdateRequest capturedConcurrentReq = null
+        ticketClient.updateTicket(300L, _ as TicketUpdateRequest) >> { Long id, TicketUpdateRequest req ->
+            capturedConcurrentReq = req
+            def t = new Ticket().tap { setId(300L); setStatus(TicketStatus.OPEN) }
+            Mono.just(new TicketUpdateResponse().tap { setTicket(t) })
+        }
+        TicketUpdateRequest capturedBulkReq = null
+        ticketClient.updateManyTickets("300", _ as TicketUpdateRequest) >> { String ids, TicketUpdateRequest req ->
+            capturedBulkReq = req
+            Mono.just(new JobStatusResponse(new JobStatus().tap { id = "job-ccs-1" }))
+        }
+
+        when: "running concurrent batch update with emailCcs and followers"
+        def concurrentResp = tools.batchUpdateTickets(
+                [300L], "Concurrent CC update", null, null, true, null, null, false,
+                null, null, null, null, null, null, null, null, null, null, null,
+                ["batch_cc@example.com"], [888L], null, null
+        )
+
+        then:
+        concurrentResp != null
+        concurrentResp.results.size() == 1
+        concurrentResp.results[0].success
+        capturedConcurrentReq != null
+        capturedConcurrentReq.ticket.emailCcs.size() == 1
+        capturedConcurrentReq.ticket.emailCcs[0].userEmail == "batch_cc@example.com"
+        capturedConcurrentReq.ticket.followers.size() == 1
+        capturedConcurrentReq.ticket.followers[0].userId == "888"
+
+        when: "running async bulk batch update with emailCcs and followers"
+        def bulkResp = tools.batchUpdateTickets(
+                [300L], null, null, null, null, null, null, true,
+                null, null, null, null, null, null, null, null, null, null, null,
+                ["bulk_cc@example.com"], [999L], null, null
+        )
+
+        then:
+        bulkResp != null
+        bulkResp.jobStatus != null
+        bulkResp.jobStatus.id == "job-ccs-1"
+        capturedBulkReq != null
+        capturedBulkReq.ticket.emailCcs.size() == 1
+        capturedBulkReq.ticket.emailCcs[0].userEmail == "bulk_cc@example.com"
+        capturedBulkReq.ticket.followers.size() == 1
+        capturedBulkReq.ticket.followers[0].userId == "999"
+    }
+
+    def "ticket tools validate emailCcs and followers inputs reject invalid values"() {
+        when: "emailCcs contains null"
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, ["valid@example.com", null], null, null)
+
+        then:
+        def e1 = thrown(IllegalArgumentException)
+        e1.message.contains("Entry in 'emailCcs' cannot be null")
+
+        when: "followers contains negative ID"
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [-5L], null)
+
+        then:
+        def e2 = thrown(IllegalArgumentException)
+        e2.message.contains("User ID in 'followers' must be a positive integer, got: -5")
+
+        when: "emailCcs contains invalid email string"
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, ["not an email"], null, null)
+
+        then:
+        def e3 = thrown(IllegalArgumentException)
+        e3.message.contains("Invalid entry in 'emailCcs': expected a valid email address or numeric user ID")
+
+        when: "emailCcs map entry lacks both user_id and user_email"
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [[action: "put"]], null, null)
+
+        then:
+        def e4 = thrown(IllegalArgumentException)
+        e4.message.contains("Entry in 'emailCcs' must specify at least 'user_id' or 'user_email'")
+
+        when: "emailCcs has invalid entry type"
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [true], null, null)
+
+        then:
+        def e5 = thrown(IllegalArgumentException)
+        e5.message.contains("Entry in 'emailCcs' must be a user ID (Number), email (String), or Map, got: Boolean")
+
+        when: "emailCcs is passed as non-collection in CallToolRequest"
+        def badReq = new CallToolRequest("createTicket", [
+                subject: "Subj",
+                comment: "Comm",
+                email_ccs: "not-a-list"
+        ])
+        tools.createTicket("Subj", "Comm", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, badReq)
+
+        then:
+        def e6 = thrown(IllegalArgumentException)
+        e6.message.contains("emailCcs must be a list, got: String")
+    }
+
+    def "TicketMutationOptions toBuilder and builders preserve emailCcs and followers"() {
+        given:
+        def initialCc = new EmailCC().setUserEmail("orig_cc@example.com").setAction(EmailCCAllOfAction.PUT)
+        def initialFollower = new Follower().setUserId("123").setAction(EmailCCAllOfAction.PUT)
+        def initial = TicketMutationOptions.builder()
+                .comment("Original")
+                .emailCcs([initialCc])
+                .followers([initialFollower])
+                .build()
+
+        when:
+        def newCc = new EmailCC().setUserEmail("new_cc@example.com").setAction(EmailCCAllOfAction.DELETE)
+        def modified = initial.toBuilder()
+                .emailCcs([newCc])
+                .build()
+
+        then:
+        initial.emailCcs() == [initialCc]
+        initial.followers() == [initialFollower]
+        modified.emailCcs() == [newCc]
+        modified.followers() == [initialFollower]
         modified.comment() == "Original"
     }
 
