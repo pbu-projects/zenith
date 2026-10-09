@@ -20,7 +20,6 @@ import lol.pbu.z4j.model.EmailCC
 import lol.pbu.z4j.model.EmailCCAllOfAction
 import lol.pbu.z4j.model.Follower
 import spock.lang.Specification
-import spock.lang.Unroll
 
 class ToolValidationSupportSpec extends Specification {
 
