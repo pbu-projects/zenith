@@ -4677,6 +4677,43 @@ class ZendeskToolsValidationSpec extends Specification {
         result instanceof ViewTicketsResult
         result.returnedCount == 0
     }
+
+    def "createTicket and updateTicket resolve problemId and subject from request arguments"() {
+        given:
+        ticketClient.showTicket(999L) >> Mono.just(new TicketResponse(new Ticket(1L).tap { type = TicketType.PROBLEM }))
+        ticketClient.createTicket(_) >> Mono.just(new TicketResponse(new Ticket(2L)))
+        ticketClient.showTicket(100L) >> Mono.just(new TicketResponse(new Ticket(100L)))
+        ticketClient.updateTicket(100L, _ as TicketUpdateRequest) >> Mono.just(new TicketUpdateResponse())
+
+        when: "problemId is string in request arguments"
+        def res = tools.createTicket(
+                "Subject", "Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                new CallToolRequest("createTicket", [problemId: "999"])
+        )
+
+        then:
+        res != null
+
+        when: "problemId is invalid string in request arguments"
+        tools.createTicket(
+                "Subject", "Comment", true, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                new CallToolRequest("createTicket", [problemId: "not-a-number"])
+        )
+
+        then:
+        def e = thrown(IllegalArgumentException)
+        e.message.contains("Invalid problemId: 'not-a-number'")
+
+        when: "subject is provided via request arguments on updateTicket"
+        def resSubj = tools.updateTicket(
+                100L,
+                TicketMutationOptions.builder().comment("Comment").isPublic(true).build(),
+                new CallToolRequest("updateTicket", [subject: "Resolved from Request"])
+        )
+
+        then:
+        resSubj != null
+    }
 }
 
 
